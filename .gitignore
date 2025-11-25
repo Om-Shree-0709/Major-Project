@@ -1,0 +1,21 @@
+# Major Project repo-level ignores
+
+# Node/Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Python/Backend
+backend/.venv/
+backend/__pycache__/
+
+# Environment and secrets
+.env
+.env.*
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
