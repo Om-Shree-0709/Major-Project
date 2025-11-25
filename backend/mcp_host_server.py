@@ -1,30 +1,28 @@
 import json
-import time
-import asyncio
 import os
+import asyncio
 from typing import Dict, Any, List, Optional
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware  # <--- CRITICAL IMPORT
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 import uvicorn
 import nest_asyncio
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 # Load environment variables
 load_dotenv()
-
-# Apply nest_asyncio
 nest_asyncio.apply()
 
 # --- Import Core Structures ---
+# Handles both direct execution and module execution
 try:
-    from .mcp_core import IMCPExternalServer, MCPTool
-except ImportError:
-    # Fallback for running script directly
     from mcp_core import IMCPExternalServer, MCPTool
+except ImportError:
+    from .mcp_core import IMCPExternalServer, MCPTool
 
 # --------------------------------------------------------------------------------
-# 1. FASTAPI SCHEMAS AND APP SETUP
+# 1. SETUP & CONFIGURATION
 # --------------------------------------------------------------------------------
 
 class HostQuery(BaseModel):
@@ -35,160 +33,169 @@ class HostResponse(BaseModel):
     final_answer: str
     tool_calls_executed: List[Dict[str, Any]] = Field(default_factory=list)
 
-app = FastAPI(title="B.Tech MCP Host Server", version="1.0")
+app = FastAPI(title="B.Tech MCP Host Agent", version="2.0 (Smart Mode)")
 
-# --- CRITICAL: CORS MIDDLEWARE ---
-# This allows the React Frontend (port 5173) to communicate with this Backend (port 8000)
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-    "http://localhost:3000"
-]
-
+# Allow Frontend Connection
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# ---------------------------------
 
 CONNECTED_SERVERS: Dict[str, IMCPExternalServer] = {}
 
-# --- Server Imports ---
+# Import Tools
 try:
     from .filesystem_server import FilesystemMCPServer
     from .browser_server import BrowserMCPServer
     from .github_server import GitHubMCPServer
-except ImportError as e:
-    print(f"⚠️  Import Warning: Could not import one or more servers. {e}")
-    # We continue, but some tools won't be available
-    FilesystemMCPServer = None
-    BrowserMCPServer = None
-    GitHubMCPServer = None
-
-# Placeholder Server
-class PlaceholderMCPServer(IMCPExternalServer):
-    def list_tools(self) -> List[MCPTool]:
-        return [MCPTool(name="example.get_status", description="Checks host status.", parameters={"type": "object", "properties": {}})]
-    def execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
-        return {"status": "Host Online", "servers_active": list(CONNECTED_SERVERS.keys())}
+except ImportError:
+    # Fallback for local testing
+    from filesystem_server import FilesystemMCPServer
+    from browser_server import BrowserMCPServer
+    from github_server import GitHubMCPServer
 
 def initialize_host():
     """Initializes and registers all connected MCP servers."""
-    print("Initializing MCP Host...")
-    
-    # 1. Register Placeholder
-    CONNECTED_SERVERS["placeholder"] = PlaceholderMCPServer(name="Placeholder")
-    
-    # 2. Register Specialized Servers (if imports worked)
-    if FilesystemMCPServer:
-        try:
-            CONNECTED_SERVERS["filesystem"] = FilesystemMCPServer()
-        except Exception as e:
-            print(f"❌ Filesystem Init Failed: {e}")
-
-    if BrowserMCPServer:
-        try:
-            CONNECTED_SERVERS["browser"] = BrowserMCPServer()
-        except Exception as e:
-            print(f"❌ Browser Init Failed: {e}")
-        
-    if GitHubMCPServer:
-        try:
-            CONNECTED_SERVERS["github"] = GitHubMCPServer()
-        except Exception as e:
-            print(f"❌ GitHub Init Failed: {e}")
-
-    print(f"✅ Registered {len(CONNECTED_SERVERS)} servers: {list(CONNECTED_SERVERS.keys())}")
-
+    print("Initializing Smart MCP Host...")
+    try:
+        CONNECTED_SERVERS["filesystem"] = FilesystemMCPServer()
+        CONNECTED_SERVERS["browser"] = BrowserMCPServer()
+        CONNECTED_SERVERS["github"] = GitHubMCPServer()
+        print(f"✅ Servers Online: {list(CONNECTED_SERVERS.keys())}")
+    except Exception as e:
+        print(f"❌ Server Init Error: {e}")
 
 # --------------------------------------------------------------------------------
-# 2. CORE ORCHESTRATION LOGIC (SIMULATED FOR PHASE B TESTING)
+# 2. INTELLIGENT AGENT LOGIC (GEMINI API)
 # --------------------------------------------------------------------------------
 
-def simulate_llm_tool_selection(user_query: str, available_tools: List[MCPTool]) -> Optional[Dict[str, Any]]:
+def clean_json_string(json_str: str) -> str:
+    """Cleans Markdown formatting (```json ... ```) from LLM response."""
+    cleaned = json_str.strip()
+    if cleaned.startswith("```json"):
+        cleaned = cleaned[7:]
+    if cleaned.startswith("```"):
+        cleaned = cleaned[3:]
+    if cleaned.endswith("```"):
+        cleaned = cleaned[:-3]
+    return cleaned.strip()
+
+def smart_tool_selection(user_query: str, available_tools: List[MCPTool]) -> Optional[Dict[str, Any]]:
     """
-    SIMULATED DECISION ENGINE.
-    This replaces the real Gemini API for the initial connectivity test.
+    Sends the user query and tool definitions to Gemini to decide the best action.
     """
-    query = user_query.lower()
-    
-    # Filesystem Triggers
-    if "list files" in query:
-        return {"server_name": "filesystem", "tool_name": "filesystem.list_dir", "args": {"path": "."}}
-    if "read file" in query:
-        # Extract filename roughly
-        path = "README.txt" # Default for test
-        words = query.split()
-        for w in words:
-            if "." in w and len(w) > 2: path = w
-        return {"server_name": "filesystem", "tool_name": "filesystem.read_file", "args": {"path": path}}
-    if "write file" in query or "create file" in query:
-        return {"server_name": "filesystem", "tool_name": "filesystem.write_file", "args": {"path": "test_log.txt", "content": "System Online"}}
+    api_key = os.getenv("GEMINI_API_KEY")
+    if not api_key:
+        print("❌ CRITICAL ERROR: GEMINI_API_KEY is missing in .env")
+        return None
 
-    # Browser Triggers
-    if "browse" in query:
-        url = "https://example.com"
-        for word in query.split():
-            if word.startswith("http"): url = word
-        return {"server_name": "browser", "tool_name": "browser.navigate_and_get_text", "args": {"url": url}}
+    genai.configure(api_key=api_key)
+    # UPDATED MODEL NAME HERE
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
-    # GitHub Triggers
-    if "repos" in query:
-        return {"server_name": "github", "tool_name": "github.list_repos", "args": {}}
+    # Prepare Tool Descriptions for the AI
+    tools_json = json.dumps([t.dict() for t in available_tools], indent=2)
+    
+    system_prompt = f"""
+    You are an AI Agent Orchestrator. You have access to the following tools:
+    {tools_json}
 
-    # Status Trigger
-    if "status" in query:
-        return {"server_name": "placeholder", "tool_name": "example.get_status", "args": {}}
-    
-    return None
+    USER REQUEST: "{user_query}"
 
-def orchestrate_request(query: HostQuery) -> HostResponse:
-    """Orchestration: Query -> Tool Selection -> Execution -> Response"""
+    YOUR GOAL:
+    1. Decide if any tool is needed to fulfill the request.
+    2. If YES: Return a STRICT JSON object with "server_name", "tool_name", and "args".
+    3. If NO (or if you can answer directly): Return an empty JSON object {{}}.
     
-    # 1. Discover Tools
-    available_tools = []
-    for s in CONNECTED_SERVERS.values():
-        try:
-            available_tools.extend(s.list_tools())
-        except: pass
-    
-    # 2. Select Tool (Simulated)
-    tool_call = simulate_llm_tool_selection(query.user_query, available_tools)
-    
-    if tool_call:
-        server_name = tool_call["server_name"]
-        tool_name = tool_call["tool_name"]
-        args = tool_call["args"]
-        server = CONNECTED_SERVERS.get(server_name)
+    IMPORTANT: Return ONLY valid JSON. Do not write explanation text outside the JSON.
+    """
+
+    try:
+        print("🤖 Asking Gemini for a plan...")
+        response = model.generate_content(system_prompt)
+        cleaned_response = clean_json_string(response.text)
         
-        if server:
-            print(f"--- 🛠️ Executing {tool_name} on {server_name} ---")
-            try:
-                # 3. Execute Tool
-                result = server.execute_tool(tool_name, args)
-                final_text = f"I successfully executed '{tool_name}'. \n\n**Result:**\n{str(result)[:300]}..."
-                return HostResponse(final_answer=final_text, tool_calls_executed=[{"tool": tool_name, "result": result}])
-            except Exception as e:
-                return HostResponse(final_answer=f"Tool Execution Failed: {e}", tool_calls_executed=[])
-        else:
-            return HostResponse(final_answer="Server not found internal error.")
+        if not cleaned_response or cleaned_response == "{}":
+            return None
             
-    else:
-        return HostResponse(final_answer=f"I received your query: '{query.user_query}'. \n(No specific tool trigger detected in Simulation Mode).")
+        tool_decision = json.loads(cleaned_response)
+        return tool_decision
 
+    except Exception as e:
+        print(f"⚠️ Gemini Decision Error: {e}")
+        return None
+
+def generate_final_answer(user_query: str, tool_result: Dict[str, Any]) -> str:
+    """Generates a natural language summary after the tool has finished."""
+    api_key = os.getenv("GEMINI_API_KEY")
+    genai.configure(api_key=api_key)
+    # UPDATED MODEL NAME HERE
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    prompt = f"""
+    User Query: "{user_query}"
+    Tool Execution Result: {json.dumps(tool_result)}
+    
+    Please provide a helpful, natural language response to the user based on this result.
+    """
+    response = model.generate_content(prompt)
+    return response.text
 
 # --------------------------------------------------------------------------------
-# 3. FASTAPI ENDPOINT
+# 3. ORCHESTRATION & ENDPOINT
 # --------------------------------------------------------------------------------
 
 @app.post("/query", response_model=HostResponse)
 async def process_user_query(query: HostQuery):
-    return orchestrate_request(query)
+    
+    # 1. Gather all tools
+    all_tools = []
+    for s in CONNECTED_SERVERS.values():
+        all_tools.extend(s.list_tools())
+
+    # 2. Ask AI to pick a tool
+    decision = smart_tool_selection(query.user_query, all_tools)
+
+    if decision:
+        server_name = decision.get("server_name")
+        tool_name = decision.get("tool_name")
+        args = decision.get("args", {})
+        
+        server = CONNECTED_SERVERS.get(server_name)
+        if server:
+            # 3. Execute the Tool
+            print(f"⚡ Executing {tool_name} on {server_name}...")
+            try:
+                tool_result = server.execute_tool(tool_name, args)
+                
+                # 4. Generate Final Answer based on Tool Result
+                final_text = generate_final_answer(query.user_query, tool_result)
+                
+                return HostResponse(
+                    final_answer=final_text, 
+                    tool_calls_executed=[{"tool": tool_name, "result": tool_result}]
+                )
+            except Exception as e:
+                return HostResponse(final_answer=f"Tool Error: {str(e)}")
+        else:
+             return HostResponse(final_answer=f"Error: Server '{server_name}' not found.")
+
+    else:
+        # 5. No tool needed (Chat Mode)
+        api_key = os.getenv("GEMINI_API_KEY")
+        if api_key:
+            genai.configure(api_key=api_key)
+            # UPDATED MODEL NAME HERE
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(query.user_query)
+            return HostResponse(final_answer=response.text)
+        else:
+            return HostResponse(final_answer="I am online, but GEMINI_API_KEY is missing, so I can't think.")
 
 if __name__ == "__main__":
     initialize_host()
-    print("\n--- 🚀 B.Tech MCP Host Server Online ---")
+    print("\n--- 🧠 Smart MCP Host Agent Online ---")
     uvicorn.run(app, host="127.0.0.1", port=8000)

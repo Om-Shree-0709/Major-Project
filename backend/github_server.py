@@ -2,10 +2,15 @@ import os
 from typing import Dict, Any, List, Optional
 from github import Github, Auth, GithubException
 from dotenv import load_dotenv
-# Import core structures to break the circular dependency
-from .mcp_core import IMCPExternalServer, MCPTool 
 
-# Load environment variables (needed here as well, in case the server is run independently)
+# --- FIX: Use absolute import (remove the dot) ---
+try:
+    from mcp_core import IMCPExternalServer, MCPTool
+except ImportError:
+    # Fallback in case it's run from a parent directory
+    from .mcp_core import IMCPExternalServer, MCPTool
+
+# Load environment variables
 load_dotenv()
 
 class GitHubMCPServer(IMCPExternalServer):
