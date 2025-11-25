@@ -16,7 +16,7 @@ load_dotenv()
 nest_asyncio.apply()
 
 # --- Import Core Structures ---
-from backend.mcp_core import IMCPExternalServer, MCPTool
+from .mcp_core import IMCPExternalServer, MCPTool
 
 # --------------------------------------------------------------------------------
 # 1. FASTAPI SCHEMAS AND APP SETUP
@@ -36,11 +36,13 @@ app = FastAPI(title="B.Tech MCP Host Server", version="1.0", description="Orches
 CONNECTED_SERVERS: Dict[str, IMCPExternalServer] = {}
 
 # --- Server Imports ---
+# CORRECT
 try:
-    from backend.filesystem_server import FilesystemMCPServer
-    from browser_server import BrowserMCPServer
-    from backend.github_server import GitHubMCPServer
+    from .filesystem_server import FilesystemMCPServer
+    from .browser_server import BrowserMCPServer
+    from .github_server import GitHubMCPServer
 except ImportError as e:
+    # ...
     # This block is for debugging if the files were not found
     print(f"CRITICAL ERROR: Could not import a server file. Ensure all server files are in the same directory. Error: {e}")
     # Define dummy classes to allow basic startup for debugging

@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Optional
 from github import Github, Auth, GithubException
 from dotenv import load_dotenv
 # Import core structures to break the circular dependency
-from backend.mcp_core import IMCPExternalServer, MCPTool 
+from .mcp_core import IMCPExternalServer, MCPTool 
 
 # Load environment variables (needed here as well, in case the server is run independently)
 load_dotenv()

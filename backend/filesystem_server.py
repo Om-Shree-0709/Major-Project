@@ -1,7 +1,7 @@
 import os
 from typing import Dict, Any, List
 # Import core structures to break the circular dependency
-from backend.mcp_core import IMCPExternalServer, MCPTool 
+from .mcp_core import IMCPExternalServer, MCPTool 
 
 # --- Configuration ---
 SANDBOX_DIR = "mcp_sandbox" 
