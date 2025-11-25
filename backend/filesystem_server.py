@@ -1,5 +1,6 @@
 import os
 from typing import Dict, Any, List
+
 # FIX: Robust Import
 try:
     from mcp_core import IMCPExternalServer, MCPTool 
@@ -44,7 +45,7 @@ class FilesystemMCPServer(IMCPExternalServer):
             if tool_name == "filesystem.read_file":
                 path = self._get_absolute_path(args.get("path", ""))
                 with open(path, 'r') as f: content = f.read()
-                return {"path": args["path"], "content_length": len(content), "content_snippet": content[:500]}
+                return {"path": args["path"], "content_length": len(content), "content_snippet": content[:1000]}
             elif tool_name == "filesystem.write_file":
                 path = self._get_absolute_path(args.get("path", ""))
                 with open(path, 'w') as f: f.write(args.get("content", ""))
