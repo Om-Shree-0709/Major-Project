@@ -3,14 +3,14 @@ from __future__ import annotations
 import logging
 import inspect
 import asyncio
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 from abc import ABC, abstractmethod
 
 from pydantic import BaseModel, Field
 
 # Optional dependency for robust JSON Schema validation
 try:
-    import jsonschema  # type: ignore
+    import jsonschema
     HAVE_JSONSCHEMA = True
 except Exception:
     HAVE_JSONSCHEMA = False
@@ -32,7 +32,7 @@ class MCPTool(BaseModel):
     description: str = Field(..., description="Human/LLM-friendly description of the tool")
     parameters: Dict[str, Any] = Field(
         default_factory=lambda: {"type": "object", "properties": {}, "required": []},
-        description="JSON Schema (object) for tool parameters (OpenAPI/JSON Schema format)",
+        description="JSON Schema (object) for tool parameters",
     )
 
 
@@ -108,28 +108,29 @@ class IMCPExternalServer(ABC):
                 # validation failure treated as bad request
                 raise ToolExecutionError(f"Invalid arguments for tool '{tool_name}': {e}", code=400)
 
-            # prefer explicit async implementation if provided
-            impl_async = getattr(self, "async_execute_tool", None)
-            impl_sync = getattr(self, "execute_tool", None)
+            # --- FIX: Correctly check for overrides ---
+            # Check if the subclass actually implemented async_execute_tool
+            # We compare the subclass method against the base class method
+            async_impl = self.__class__.async_execute_tool
+            base_async_impl = IMCPExternalServer.async_execute_tool
+            
+            if async_impl != base_async_impl:
+                # Subclass HAS implemented async_execute_tool
+                return await self.async_execute_tool(tool_name, args)
 
-            # If subclass implemented async_execute_tool (and not the base), call it
-            if impl_async is not None and impl_async is not IMCPExternalServer.async_execute_tool:
-                if inspect.iscoroutinefunction(impl_async):
-                    return await impl_async(tool_name, args)
-                # fallback if user provided non-async function under that name
-                result = impl_async(tool_name, args)
-                if inspect.isawaitable(result):
-                    return await result
-                return result
+            # Otherwise, check if sync execute_tool is implemented
+            sync_impl = self.__class__.execute_tool
+            base_sync_impl = IMCPExternalServer.execute_tool
 
-            # If subclass implemented a synchronous execute_tool, run it in threadpool
-            if impl_sync is not None and impl_sync is not IMCPExternalServer.execute_tool:
-                if inspect.iscoroutinefunction(impl_sync):
-                    # unexpected but handle coroutine
-                    return await impl_sync(tool_name, args)
-                # run blocking sync function in executor
-                loop = asyncio.get_event_loop()
-                return await loop.run_in_executor(None, lambda: impl_sync(tool_name, args))
+            if sync_impl != base_sync_impl:
+                # Subclass HAS implemented execute_tool
+                if inspect.iscoroutinefunction(sync_impl):
+                    # In case user made 'execute_tool' async by mistake, await it
+                    return await self.execute_tool(tool_name, args)
+                else:
+                    # Run blocking sync function in executor
+                    loop = asyncio.get_event_loop()
+                    return await loop.run_in_executor(None, lambda: self.execute_tool(tool_name, args))
 
             raise ToolExecutionError("No tool execution method implemented in server", code=501)
         except ToolExecutionError:
@@ -160,8 +161,8 @@ class IMCPExternalServer(ABC):
         if HAVE_JSONSCHEMA and isinstance(schema, dict):
             try:
                 jsonschema.validate(instance=args, schema=schema)
-            except Exception as ve:  # jsonschema.ValidationError or similar
-                raise ToolExecutionError(f"Argument validation failed: {ve}", code=400, details=getattr(ve, "message", str(ve)))
+            except Exception as e:  # Fixed syntax error here
+                raise ToolExecutionError(f"Argument validation failed: {e}", code=400)
         else:
             # Lightweight fallback: check required fields in schema if present
             required = None
