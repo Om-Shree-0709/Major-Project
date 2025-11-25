@@ -1,76 +1,57 @@
-import asyncio
-from typing import Dict, Any, List
-from playwright.async_api import async_playwright
+import os
+from typing import Dict, Any, List, Optional
+from github import Github, Auth
+from dotenv import load_dotenv
 
-# FIX: Robust Import
 try:
     from mcp_core import IMCPExternalServer, MCPTool 
 except ImportError:
     from .mcp_core import IMCPExternalServer, MCPTool
 
-class BrowserMCPServer(IMCPExternalServer):
-    """MCP Server providing tools for web browsing and searching."""
+load_dotenv()
+
+class GitHubMCPServer(IMCPExternalServer):
+    """MCP Server providing tools for GitHub."""
     def __init__(self):
-        super().__init__(name="Browser")
-        self.loop = asyncio.get_event_loop()
-        print(f"Browser MCP Server initialized.")
+        super().__init__(name="GitHub")
+        self.pat = os.getenv("GITHUB_PAT") 
+        self.g = None
+        if self.pat:
+            try:
+                self.g = Github(auth=Auth.Token(self.pat))
+                self.user = self.g.get_user()
+            except Exception:
+                print("GitHub Auth Failed.")
 
     def list_tools(self) -> List[MCPTool]:
+        if not self.g: return []
         return [
-            MCPTool(
-                name="browser.navigate_and_get_text", 
-                description="Navigates to URL and returns text.", 
-                parameters={"type": "object", "properties": {"url": {"type": "string"}}, "required": ["url"]}
-            ),
-            MCPTool(
-                name="browser.perform_google_search", 
-                description="Performs a Google search and returns the top results. Use this for general questions like 'latest tech news'.", 
-                parameters={"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}
-            )
+            MCPTool(name="github.list_repos", description="Lists top 10 repos.", parameters={"type": "object", "properties": {}}),
+            MCPTool(name="github.get_repo_contents", description="Get file content.", parameters={"type": "object", "properties": {"repo_name": {"type": "string"}, "path": {"type": "string"}}, "required": ["repo_name", "path"]}),
+            # NEW TOOL
+            MCPTool(name="github.get_user_info", description="Get authenticated user details.", parameters={"type": "object", "properties": {}}),
         ]
 
-    async def _navigate_and_get_text_async(self, url: str) -> str:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            await page.goto(url, timeout=60000) 
-            content = await page.inner_text('body')
-            await browser.close()
-            return content
-
-    async def _google_search_async(self, query: str) -> Dict[str, Any]:
-        """Performs a real Google Search and extracts titles/snippets."""
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            
-            # Go to Google
-            await page.goto(f"[https://www.google.com/search?q=](https://www.google.com/search?q=){query}", timeout=60000)
-            await page.wait_for_load_state("networkidle")
-            
-            # Extract Results (Simple scraping of search result headers)
-            results = []
-            elements = await page.query_selector_all('div.g')
-            
-            for el in elements[:5]: # Get top 5 results
-                try:
-                    text = await el.inner_text()
-                    results.append(text.split('\n')[0]) # Just take the title/headline
-                except: pass
-                
-            await browser.close()
-            return {"query": query, "top_results": results}
-
     def execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+        if not self.g: return {"error": "No GitHub Access"}
         try:
-            if tool_name == "browser.navigate_and_get_text":
-                content = self.loop.run_until_complete(self._navigate_and_get_text_async(args["url"]))
-                return {"content": content[:1000]} # Limit size
+            if tool_name == "github.list_repos":
+                repos = [{"name": r.name, "url": r.html_url, "stars": r.stargazers_count} for r in self.user.get_repos()[:5]]
+                return {"repos": repos}
             
-            elif tool_name == "browser.perform_google_search":
-                return self.loop.run_until_complete(self._google_search_async(args["query"]))
+            elif tool_name == "github.get_repo_contents":
+                repo = self.g.get_repo(f"{self.user.login}/{args['repo_name']}")
+                content = repo.get_contents(args['path'])
+                return {"content": content.decoded_content.decode('utf-8')[:1000]}
             
+            elif tool_name == "github.get_user_info":
+                return {
+                    "login": self.user.login,
+                    "name": self.user.name,
+                    "public_repos": self.user.public_repos,
+                    "followers": self.user.followers
+                }
+
             return {"error": "Tool not found"}
         except Exception as e:
-            print(f"Browser Error: {e}")
             return {"error": str(e)}

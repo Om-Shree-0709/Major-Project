@@ -1,9 +1,6 @@
 import sys
 import asyncio
 
-# --- CRITICAL FIX FOR WINDOWS + PLAYWRIGHT ---
-# This forces Python to use the SelectorEventLoop, which is required 
-# for Playwright to work inside uvicorn on Windows.
 if sys.platform == 'win32':
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 # ---------------------------------------------
