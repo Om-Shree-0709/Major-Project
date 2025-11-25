@@ -15,7 +15,6 @@ load_dotenv()
 nest_asyncio.apply()
 
 # --- Import Core Structures ---
-# Handles both direct execution and module execution
 try:
     from mcp_core import IMCPExternalServer, MCPTool
 except ImportError:
@@ -46,16 +45,19 @@ app.add_middleware(
 
 CONNECTED_SERVERS: Dict[str, IMCPExternalServer] = {}
 
-# Import Tools
+# Import Tools (Robust Import Strategy)
 try:
-    from .filesystem_server import FilesystemMCPServer
-    from .browser_server import BrowserMCPServer
-    from .github_server import GitHubMCPServer
-except ImportError:
-    # Fallback for local testing
     from filesystem_server import FilesystemMCPServer
     from browser_server import BrowserMCPServer
     from github_server import GitHubMCPServer
+except ImportError:
+    # Fallback if running as a package
+    try:
+        from .filesystem_server import FilesystemMCPServer
+        from .browser_server import BrowserMCPServer
+        from .github_server import GitHubMCPServer
+    except ImportError as e:
+        print(f"⚠️ Critical Import Error: {e}")
 
 def initialize_host():
     """Initializes and registers all connected MCP servers."""
@@ -93,7 +95,7 @@ def smart_tool_selection(user_query: str, available_tools: List[MCPTool]) -> Opt
         return None
 
     genai.configure(api_key=api_key)
-    # UPDATED MODEL NAME HERE
+    # UPDATED MODEL NAME
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     # Prepare Tool Descriptions for the AI
@@ -132,7 +134,7 @@ def generate_final_answer(user_query: str, tool_result: Dict[str, Any]) -> str:
     """Generates a natural language summary after the tool has finished."""
     api_key = os.getenv("GEMINI_API_KEY")
     genai.configure(api_key=api_key)
-    # UPDATED MODEL NAME HERE
+    # UPDATED MODEL NAME
     model = genai.GenerativeModel('gemini-1.5-flash')
     
     prompt = f"""
@@ -188,7 +190,6 @@ async def process_user_query(query: HostQuery):
         api_key = os.getenv("GEMINI_API_KEY")
         if api_key:
             genai.configure(api_key=api_key)
-            # UPDATED MODEL NAME HERE
             model = genai.GenerativeModel('gemini-1.5-flash')
             response = model.generate_content(query.user_query)
             return HostResponse(final_answer=response.text)
