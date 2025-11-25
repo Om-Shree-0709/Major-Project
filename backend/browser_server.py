@@ -3,7 +3,7 @@ import os
 from typing import Dict, Any, List
 from playwright.async_api import async_playwright
 # Import core structures to break the circular dependency
-from .mcp_core import IMCPExternalServer, MCPTool 
+from mcp_core import IMCPExternalServer, MCPTool 
 
 class BrowserMCPServer(IMCPExternalServer):
     """

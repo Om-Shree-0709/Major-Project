@@ -1,103 +1,36 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { Send, Cpu, BookOpen, GitBranch, Terminal } from "lucide-react";
+import {
+  Send,
+  Cpu,
+  BookOpen,
+  GitBranch,
+  Terminal,
+  MoreVertical,
+  Sparkles,
+  LayoutGrid,
+} from "lucide-react";
+import "./App.css"; // Import the plain CSS file
 
-// --- Configuration ---
-// IMPORTANT: The backend host is typically at http://127.0.0.1:8000
-// The API endpoint used by the UI is /query (and the docs are available at /docs).
-const API_URL = import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/query";
+// Pointing to Localhost Backend
+const API_URL = "http://127.0.0.1:8000/query";
 
-// --- Utility Functions ---
-
-// Simple syntax highlighting for tool execution logs
+// --- Helpers ---
 const formatJson = (jsonString) => {
   try {
-    const obj = JSON.parse(jsonString);
+    const obj =
+      typeof jsonString === "string" ? JSON.parse(jsonString) : jsonString;
     return JSON.stringify(obj, null, 2);
   } catch (e) {
-    return jsonString;
+    return String(jsonString);
   }
 };
 
-// Map tool names to icons
 const getToolIcon = (toolName) => {
-  if (toolName.startsWith("filesystem"))
-    return <BookOpen size={16} className="text-green-500" />;
-  if (toolName.startsWith("browser"))
-    return <Terminal size={16} className="text-blue-500" />;
-  if (toolName.startsWith("github"))
-    return <GitBranch size={16} className="text-purple-500" />;
-  return <Cpu size={16} className="text-yellow-500" />;
+  if (toolName.includes("filesystem")) return <BookOpen size={16} />;
+  if (toolName.includes("browser")) return <Terminal size={16} />;
+  if (toolName.includes("github")) return <GitBranch size={16} />;
+  return <Cpu size={16} />;
 };
-
-const ChatMessage = ({ message }) => (
-  <div className={`message ${message.sender === "user" ? "user" : ""}`}>
-    <div className="meta">
-      {message.sender === "user" ? "You" : "Agent Host"}
-    </div>
-    <p>{message.text}</p>
-
-    {message.toolCalls && message.toolCalls.length > 0 && (
-      <div
-        style={{
-          marginTop: 12,
-          borderTop: "1px solid #eef2f6",
-          paddingTop: 12,
-        }}
-      >
-        <h3
-          style={{
-            fontSize: 13,
-            fontWeight: 700,
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          <Cpu size={18} style={{ color: "#ef4444" }} />
-          Tool Execution Trace:
-        </h3>
-        {message.toolCalls.map((call, index) => (
-          <div
-            key={index}
-            style={{
-              background: "#fafafa",
-              padding: 10,
-              borderRadius: 8,
-              border: "1px solid #eceff4",
-              marginTop: 8,
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                fontSize: 13,
-                color: "#4f46e5",
-                fontWeight: 600,
-              }}
-            >
-              {getToolIcon(call.tool)}
-              <span style={{ marginLeft: 8 }}>{call.tool}</span>
-            </div>
-            <pre
-              style={{
-                fontSize: 12,
-                color: "#0f172a",
-                background: "#ffffff",
-                padding: 8,
-                borderRadius: 6,
-                overflowX: "auto",
-                marginTop: 8,
-              }}
-            >
-              {formatJson(JSON.stringify(call.result, null, 2))}
-            </pre>
-          </div>
-        ))}
-      </div>
-    )}
-  </div>
-);
 
 const App = () => {
   const [messages, setMessages] = useState([
@@ -109,26 +42,20 @@ const App = () => {
   ]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [isBackendOnline, setIsBackendOnline] = useState(true);
+  const [isBackendOnline, setIsBackendOnline] = useState(false);
 
-  // Function to ping the backend to check if it's running
+  // --- Backend Health Check ---
   const checkBackendStatus = useCallback(async () => {
     try {
-      // Using a non-existent session ID for a quick status check
       const response = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          user_query: "host status check",
-          session_id: "status",
+          user_query: "status check",
+          session_id: "health-check",
         }),
       });
-      // We just need the status code 200 (OK) to confirm the API is up
-      if (response.ok) {
-        setIsBackendOnline(true);
-      } else {
-        setIsBackendOnline(false);
-      }
+      setIsBackendOnline(response.ok);
     } catch (error) {
       setIsBackendOnline(false);
     }
@@ -136,19 +63,17 @@ const App = () => {
 
   useEffect(() => {
     checkBackendStatus();
-    // Set up an interval to check status every 5 seconds
     const interval = setInterval(checkBackendStatus, 5000);
-    return () => clearInterval(interval); // Cleanup on component unmount
+    return () => clearInterval(interval);
   }, [checkBackendStatus]);
 
+  // --- Send Message ---
   const handleSend = async (e) => {
     e.preventDefault();
     if (!input.trim() || isLoading) return;
 
     const userQuery = input.trim();
-    const sessionId = "session-" + Date.now();
-
-    // 1. Add user message to chat
+    // Optimistic UI update
     setMessages((prev) => [
       ...prev,
       { sender: "user", text: userQuery, toolCalls: [] },
@@ -157,42 +82,31 @@ const App = () => {
     setIsLoading(true);
 
     try {
-      // 2. Send query to the FastAPI Host
       const response = await fetch(API_URL, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_query: userQuery, session_id: sessionId }),
+        body: JSON.stringify({
+          user_query: userQuery,
+          session_id: "session-1",
+        }),
       });
 
-      if (!response.ok) {
-        // Read error message from the backend if available
-        const errorText = await response.text();
-        throw new Error(
-          `HTTP error! Status: ${
-            response.status
-          }. Detail: ${errorText.substring(0, 100)}...`
-        );
-      }
+      if (!response.ok) throw new Error("Backend Error");
 
       const data = await response.json();
 
-      // 3. Add Agent Host response
       setMessages((prev) => [
         ...prev,
         {
           sender: "agent",
           text: data.final_answer,
-          toolCalls: data.tool_calls_executed,
+          toolCalls: data.tool_calls_executed || [],
         },
       ]);
     } catch (error) {
       setMessages((prev) => [
         ...prev,
-        {
-          sender: "agent",
-          text: `ERROR: Failed to connect to backend or process query. Is the Python Host Server running at ${API_URL}? Details: ${error.message}`,
-          toolCalls: [],
-        },
+        { sender: "agent", text: `Error: ${error.message}`, toolCalls: [] },
       ]);
     } finally {
       setIsLoading(false);
@@ -200,98 +114,96 @@ const App = () => {
   };
 
   return (
-    <div className="app-shell">
-      {/* Header and Status */}
-      <header className="top-bar">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div className="logo-ic">
-            <Cpu size={20} />
-          </div>
-          <div className="brand">MCP Host Agent</div>
+    <div className="app-container">
+      {/* Header */}
+      <header className="header">
+        <div className="brand">
+          <Cpu className="brand-icon" size={28} />
+          <span className="brand-text">MCP Host Agent</span>
         </div>
         <div
-          className={
-            "status-pill " +
-            (isBackendOnline ? "status-online" : "status-offline")
-          }
+          className={`status-pill ${
+            isBackendOnline ? "status-online" : "status-offline"
+          }`}
         >
           Backend Status: {isBackendOnline ? "Online" : "Offline"}
         </div>
       </header>
 
-      {/* Chat Area */}
-      <div className="chat-wrap">
-        <div className="messages">
-          {messages.map((msg, index) => (
-            <ChatMessage key={index} message={msg} />
-          ))}
-          {isLoading && (
-            <div className="self-start">
-              <div className="p-3 bg-white rounded-xl shadow-md text-gray-500 flex items-center">
-                <svg
-                  className="animate-spin -ml-1 mr-3 h-5 w-5 text-indigo-500"
-                  xmlns="http://www.w3.org/2000/svg"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    className="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    strokeWidth="4"
-                  ></circle>
-                  <path
-                    className="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                Agent is thinking/executing tool...
-              </div>
+      {/* Chat Scroll Area */}
+      <div className="chat-area">
+        {messages.map((msg, idx) => (
+          <div
+            key={idx}
+            className={`message-card ${
+              msg.sender === "user" ? "user-msg" : ""
+            }`}
+          >
+            <div className="message-header">
+              <span>{msg.sender === "user" ? "You" : "Agent Host"}</span>
+              {msg.sender === "agent" && <Cpu size={14} />}
             </div>
-          )}
-        </div>
+            <div className="message-content">{msg.text}</div>
+
+            {/* Tool Execution Visualization */}
+            {msg.toolCalls && msg.toolCalls.length > 0 && (
+              <div className="tool-trace-container">
+                <div className="tool-trace-header">
+                  <Cpu size={14} /> Tool Execution Trace
+                </div>
+                {msg.toolCalls.map((call, i) => (
+                  <div key={i} className="tool-item">
+                    <div className="tool-name">
+                      {getToolIcon(call.tool)} {call.tool}
+                    </div>
+                    <pre className="json-block">{formatJson(call.result)}</pre>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+
+        {isLoading && (
+          <div className="message-card" style={{ opacity: 0.7 }}>
+            <div className="message-content">Thinking...</div>
+          </div>
+        )}
       </div>
 
       {/* Input Area */}
-      <div className="input-area">
-        <form onSubmit={handleSend} style={{ width: "100%" }}>
+      <div className="input-wrapper">
+        <form onSubmit={handleSend} className="input-bar">
           <input
             type="text"
+            className="text-input"
+            placeholder="Ask the AI to read a file, browse the web, or check GitHub..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder="Ask the AI to read a file, browse the web, or check GitHub..."
-            className="text-input"
-            disabled={isLoading}
+            disabled={!isBackendOnline}
           />
-
           <button
             type="submit"
-            className={
-              isLoading || !isBackendOnline
-                ? "btn btn-disabled"
-                : "btn btn-primary"
-            }
-            disabled={isLoading || !isBackendOnline}
+            className="send-btn"
+            disabled={!isBackendOnline || isLoading}
           >
-            <Send size={18} />
-            <span style={{ marginLeft: 6 }}>Send Query</span>
+            <Send size={16} /> Send Query
           </button>
         </form>
       </div>
 
-      {/* Footer / Notes */}
-      <footer className="footer">
+      {/* Footer Text */}
+      <div className="footer">
         Project Architecture: Host (React UI) connects to Orchestrator
         (FastAPI/Gemini) which calls specialized MCP Servers.
-        <div style={{ marginTop: 6 }}>
-          <a href="http://127.0.0.1:8000/docs" target="_blank" rel="noreferrer">
-            Open server /docs
-          </a>
-        </div>
-      </footer>
+      </div>
+
+      {/* Visual only: Floating Menu from screenshot */}
+      <div className="fab-menu">
+        <MoreVertical size={20} />
+        <Sparkles size={20} />
+        <LayoutGrid size={20} />
+      </div>
     </div>
   );
 };

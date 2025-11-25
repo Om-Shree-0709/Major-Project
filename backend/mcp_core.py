@@ -13,8 +13,6 @@ class IMCPExternalServer:
     """
     Abstract Interface for all specialized MCP Servers (Filesystem, Browser, GitHub).
     All concrete servers must inherit from and implement these methods.
-    
-    The Host uses this interface to discover tools (list_tools) and execute them (execute_tool).
     """
     def __init__(self, name: str):
         self.name = name
