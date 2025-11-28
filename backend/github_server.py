@@ -1,15 +1,3 @@
-# backend/github_server.py
-"""
-Production-ready GitHub MCP Server.
-
-Features:
-- Tools: rate_limit, list_repos, get_repo, read_file, create_or_update_file, delete_file,
-         list_branches, create_branch, list_issues, create_issue, create_pull_request, get_commits
-- Uses PyGithub when installed; falls back to requests-based REST calls.
-- Token via environment variable GITHUB_PAT or per-call argument github_token.
-- Structured responses with HTTP-like codes for easy orchestration by MCP host / LLM.
-"""
-
 import os
 import logging
 import base64

@@ -1,4 +1,3 @@
-# backend/mcp_core.py
 from __future__ import annotations
 import logging
 import inspect
@@ -8,7 +7,6 @@ from abc import ABC, abstractmethod
 
 from pydantic import BaseModel, Field
 
-# Optional dependency for robust JSON Schema validation
 try:
     import jsonschema
     HAVE_JSONSCHEMA = True

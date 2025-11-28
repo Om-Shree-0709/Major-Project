@@ -1,16 +1,3 @@
-# backend/mcp_host_server.py
-"""
-MCP Host Server - production-ready version.
-
-Improvements over original:
-- Uses async-safe run_tool wrapper from mcp_core for executing tools.
-- Robust model discovery with graceful fallback when Google Generative API is unavailable.
-- LLM-driven tool selection when available, otherwise a heuristic fallback.
-- Health and tools endpoints.
-- Graceful startup/shutdown of connected servers (calls optional shutdown/stop/close).
-- Structured logging and error handling.
-"""
-
 from __future__ import annotations
 import sys
 import asyncio
