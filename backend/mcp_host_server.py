@@ -9,7 +9,7 @@ from typing import Dict, Any, List, Optional, Callable, Coroutine
 
 # Windows-specific event loop policy
 if sys.platform == "win32":
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
 from contextlib import asynccontextmanager
 
@@ -361,25 +361,28 @@ async def process_user_query(query: HostQuery):
         if server_name and tool_name and not tool_name.startswith(f"{server_name}."):
             tool_name = f"{server_name}.{tool_name.split('.', 1)[-1]}"
 
+        # If the AI made up a server name (like "unknown"), ignore the tool and fall back to chat.
         if server_name not in CONNECTED_SERVERS:
-            return HostResponse(final_answer=f"Server '{server_name}' not found.", tool_calls_executed=[])
+            logger.warning(f"AI requested unknown server '{server_name}'. Falling back to chat.")
+            # Fallback to chat logic below
+            decision = None 
+        else:
+            server = CONNECTED_SERVERS[server_name]
 
-        server = CONNECTED_SERVERS[server_name]
-
-        # Execute tool via mcp_core.run_tool (async-safe)
-        try:
-            logger.info("Executing tool %s on server %s with args: %s", tool_name, server_name, args)
-            # run_tool handles validation and sync/async differences
-            result = await server.run_tool(tool_name, args)
-            final_text = await generate_final_answer(query.user_query, result)
-            record = {"server": server_name, "tool": tool_name, "args": args, "result": result}
-            return HostResponse(final_answer=final_text, tool_calls_executed=[record])
-        except ToolExecutionError as te:
-            logger.warning("ToolExecutionError: %s", te)
-            return HostResponse(final_answer=f"Tool error: {str(te)}", tool_calls_executed=[])
-        except Exception as e:
-            logger.exception("Unhandled error executing tool")
-            return HostResponse(final_answer=f"Tool execution failed: {e}", tool_calls_executed=[])
+            # Execute tool via mcp_core.run_tool (async-safe)
+            try:
+                logger.info("Executing tool %s on server %s with args: %s", tool_name, server_name, args)
+                # run_tool handles validation and sync/async differences
+                result = await server.run_tool(tool_name, args)
+                final_text = await generate_final_answer(query.user_query, result)
+                record = {"server": server_name, "tool": tool_name, "args": args, "result": result}
+                return HostResponse(final_answer=final_text, tool_calls_executed=[record])
+            except ToolExecutionError as te:
+                logger.warning("ToolExecutionError: %s", te)
+                return HostResponse(final_answer=f"Tool error: {str(te)}", tool_calls_executed=[])
+            except Exception as e:
+                logger.exception("Unhandled error executing tool")
+                return HostResponse(final_answer=f"Tool execution failed: {e}", tool_calls_executed=[])
 
     # Chat mode fallback (no tool)
     try:
