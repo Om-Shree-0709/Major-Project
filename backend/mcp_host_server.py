@@ -47,8 +47,8 @@ ACTIVE_MODEL_NAME: Optional[str] = None
 
 # Default model preferences (for Google Generative API)
 MODEL_PREFERENCES = [
-    "models/gemini-2.0-flash-lite",
     "models/gemini-1.5-flash",
+    "models/gemini-2.0-flash-lite",
     "models/gemini-1.5-flash-latest",
     "models/gemini-2.0-flash",
 ]
