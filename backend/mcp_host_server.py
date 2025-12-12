@@ -7,7 +7,7 @@ import os
 import time
 from typing import Dict, Any, List, Optional, Callable, Coroutine
 
-# Windows-specific event loop policy
+# Windows-specific event loop policy (Critical for Playwright)
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
@@ -45,12 +45,10 @@ logger.setLevel(logging.INFO)
 CONNECTED_SERVERS: Dict[str, IMCPExternalServer] = {}
 ACTIVE_MODEL_NAME: Optional[str] = None
 
-# Default model preferences (for Google Generative API)
+# Default model preferences (Prioritized for stability)
 MODEL_PREFERENCES = [
-    "models/gemini-1.5-flash",
-    "models/gemini-2.0-flash-lite",
+    "models/gemini-1.5-flash",       # Priority 1: High quota, fast
     "models/gemini-1.5-flash-latest",
-    "models/gemini-2.0-flash",
 ]
 
 
@@ -364,7 +362,6 @@ async def process_user_query(query: HostQuery):
         # If the AI made up a server name (like "unknown"), ignore the tool and fall back to chat.
         if server_name not in CONNECTED_SERVERS:
             logger.warning(f"AI requested unknown server '{server_name}'. Falling back to chat.")
-            # Fallback to chat logic below
             decision = None 
         else:
             server = CONNECTED_SERVERS[server_name]
@@ -372,16 +369,43 @@ async def process_user_query(query: HostQuery):
             # Execute tool via mcp_core.run_tool (async-safe)
             try:
                 logger.info("Executing tool %s on server %s with args: %s", tool_name, server_name, args)
-                # run_tool handles validation and sync/async differences
                 result = await server.run_tool(tool_name, args)
+
+                # --- NEW FALLBACK CHECK ---
+                # Some tools (like browser) return {"error": "...", "code": 500} instead of raising.
+                # If we detect a structured error, raise it so we trigger the catch block below.
+                if isinstance(result, dict) and (result.get("error") or result.get("code", 200) >= 400):
+                    error_msg = result.get("error", "Unknown tool error")
+                    logger.warning(f"Tool returned error payload: {error_msg}")
+                    raise ToolExecutionError(error_msg)
+
                 final_text = await generate_final_answer(query.user_query, result)
                 record = {"server": server_name, "tool": tool_name, "args": args, "result": result}
                 return HostResponse(final_answer=final_text, tool_calls_executed=[record])
-            except ToolExecutionError as te:
-                logger.warning("ToolExecutionError: %s", te)
-                return HostResponse(final_answer=f"Tool error: {str(te)}", tool_calls_executed=[])
+
             except Exception as e:
-                logger.exception("Unhandled error executing tool")
+                # --- FALLBACK LOGIC ---
+                logger.warning(f"Tool execution failed: {e}. Falling back to direct LLM response.")
+                
+                # If tool failed, ask Gemini directly (e.g. "Fetch recent tech news" -> Browser fails -> Gemini answers from knowledge)
+                if HAVE_GENAI and ACTIVE_MODEL_NAME:
+                    try:
+                        model = genai.GenerativeModel(ACTIVE_MODEL_NAME)
+                        # Direct call to Gemini with the user's original query
+                        fallback_resp = model.generate_content(query.user_query)
+                        
+                        # Return the response, but keep the tool trace so user knows it failed + fallback happened
+                        error_record = {
+                            "server": server_name,
+                            "tool": tool_name,
+                            "args": args,
+                            "result": {"error": str(e), "status": "failed", "note": "Tool failed; Answer provided by AI knowledge fallback."}
+                        }
+                        return HostResponse(final_answer=fallback_resp.text, tool_calls_executed=[error_record])
+                    except Exception as fb_e:
+                        return HostResponse(final_answer=f"Tool failed ({e}) and AI fallback failed ({fb_e})", tool_calls_executed=[])
+                
+                # If no AI available
                 return HostResponse(final_answer=f"Tool execution failed: {e}", tool_calls_executed=[])
 
     # Chat mode fallback (no tool)
@@ -418,5 +442,4 @@ async def list_all_tools():
 # CLI entrypoint
 # -------------------------
 if __name__ == "__main__":
-    # Recommended to run under process manager in production; keep reload for dev
     uvicorn.run("mcp_host_server:app", host="127.0.0.1", port=8000, reload=True)
