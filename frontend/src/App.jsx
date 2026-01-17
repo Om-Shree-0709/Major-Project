@@ -62,6 +62,8 @@ const ToolTrace = ({ tool, result }) => {
   );
 };
 
+// frontend/src/App.jsx (Partial Update - Replace the Message component)
+
 const Message = ({ msg }) => {
   const isUser = msg.sender === "user";
 
@@ -73,19 +75,19 @@ const Message = ({ msg }) => {
 
       <div className="message-content">
         <div className="message-sender">
-          {isUser ? "Om Shree" : "Host MCP Server"}
+          {isUser ? "You" : "Swarm Orchestrator"}
         </div>
 
-        {/* Tool Traces first (standard MCP flow) */}
+        {/* The swarm might call several tools before answering */}
         {msg.toolCalls && msg.toolCalls.length > 0 && (
-          <div className="tools-container">
+          <div className="swarm-chain">
+            <div className="swarm-label">Swarm Thought Process:</div>
             {msg.toolCalls.map((call, idx) => (
               <ToolTrace key={idx} tool={call.tool} result={call.result} />
             ))}
           </div>
         )}
 
-        {/* Text Content */}
         {msg.text && (
           <div className={`bubble ${isUser ? "user" : "agent"}`}>
             {msg.text}
