@@ -47,7 +47,7 @@ ACTIVE_MODEL_NAME: Optional[str] = None
 
 # Default model preferences (Prioritized for stability)
 MODEL_PREFERENCES = [
-    "models/gemini-1.5-flash",       # Priority 1: High quota, fast
+    "models/gemini-1.5-flash",       
     "models/gemini-1.5-flash-latest",
 ]
 

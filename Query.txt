@@ -1,0 +1,7 @@
+Read the contents of the README.md file from the repository om-shree-0709/major-project.
+
+Search for the latest features released in React 19.
+
+Create a file named hello_world.py inside the sandbox with a python script that prints 'Hello, MCP!'.
+
+Create a file named quick_sort.py in the sandbox that implements the QuickSort algorithm. The script should include a helper partition function and a main block that sorts the list [10, 7, 8, 9, 1, 5] and prints the result.
