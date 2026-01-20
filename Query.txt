@@ -5,3 +5,15 @@ Search for the latest features released in React 19.
 Create a file named hello_world.py inside the sandbox with a python script that prints 'Hello, MCP!'.
 
 Create a file named quick_sort.py in the sandbox that implements the QuickSort algorithm. The script should include a helper partition function and a main block that sorts the list [10, 7, 8, 9, 1, 5] and prints the result.
+
+# Start your backend (already running!)
+python server.py
+
+# Test GitHub repos query
+python test_github_repos.py
+
+# Run all tests
+python test_mcp_servers.py
+
+# Try interactive demo
+python demo_usage.py

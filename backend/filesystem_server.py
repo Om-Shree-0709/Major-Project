@@ -15,7 +15,9 @@ except ImportError:
 # -------------------------
 # Configuration
 # -------------------------
-SANDBOX_DIR = Path("mcp_sandbox").resolve()
+# Ensure SANDBOX_DIR points to backend/mcp_sandbox even if script runs from different directory
+BACKEND_DIR = Path(__file__).parent.resolve()
+SANDBOX_DIR = (BACKEND_DIR / "mcp_sandbox").resolve()
 MAX_READ_CHARS = 2000       # default truncation for read_file
 MAX_WRITE_BYTES = 2 * 1024 * 1024  # 2 MB max single write by default
 ALLOWED_TOPDIRS: Optional[List[str]] = None  # Example: ["projects", "uploads"] or None to allow all inside SANDBOX_DIR
