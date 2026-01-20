@@ -386,10 +386,15 @@ CRITICAL RULES:
 
         context_str = context.get_full_context(max_events=15)
         
+        # Build user prompt with context about file creation if needed
+        file_guidance = ""
+        if requires_file_creation:
+            file_guidance = "\n\n⚠️  IMPORTANT: This query asks you to create a file. You MUST use filesystem.write_file to save the content to a file with the requested filename. Do NOT skip this step!"
+        
         user = f"""Current query: {q.user_query}
 
 Recent context:
-{context_str}
+{context_str}{file_guidance}
 
 What is your next action? Respond with ONLY valid JSON.
 Use EXACT tool names from the list above."""
@@ -409,6 +414,53 @@ Use EXACT tool names from the list above."""
 
         # Check if final answer provided
         action = decision.get("action", "")
+        
+        # Extract filename if file creation was requested
+        extracted_filename = None
+        if requires_file_creation and action == "answer":
+            # Try to extract filename from query
+            import re
+            filename_match = re.search(r'([a-zA-Z0-9_-]+\.(?:txt|md|json|csv))', q.user_query)
+            if filename_match:
+                extracted_filename = filename_match.group(1)
+                logger.info(f"📝 Extracted filename from query: {extracted_filename}")
+            
+            # Check if write_file was already called
+            write_file_called = any(
+                tc.get("tool") == "filesystem.write_file" 
+                for tc in tool_calls
+            )
+            
+            # If file wasn't written and we have content, write it now
+            if not write_file_called and extracted_filename and tool_calls:
+                # Get the last successful tool result (likely the search results)
+                last_result = tool_calls[-1].get("result", {})
+                if last_result:
+                    # Format content from search results
+                    if isinstance(last_result, dict) and "results" in last_result:
+                        content = f"# {q.user_query}\n\n"
+                        for item in last_result["results"][:5]:
+                            title = item.get("title", "No title")
+                            url = item.get("url", "")
+                            content += f"## {title}\n[{url}]({url})\n\n"
+                        
+                        # Auto-write the file
+                        logger.info(f"🛠️  Auto-writing file {extracted_filename} with search results")
+                        try:
+                            result = SERVERS["filesystem"].execute_tool("filesystem.write_file", {
+                                "path": extracted_filename,
+                                "content": content
+                            })
+                            tool_calls.append({
+                                "server": "filesystem",
+                                "tool": "filesystem.write_file",
+                                "args": {"path": extracted_filename, "content": f"{len(content)} bytes"},
+                                "result": result
+                            })
+                            context.add_event("Filesystem", f"File written: {extracted_filename}")
+                            logger.info(f"✅ Auto-created: {extracted_filename}")
+                        except Exception as e:
+                            logger.error(f"❌ Failed to auto-write file: {e}")
         
         if action == "answer":
             final_answer = decision.get("answer", "No answer provided")
