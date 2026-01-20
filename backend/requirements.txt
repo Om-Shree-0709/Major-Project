@@ -1,11 +1,16 @@
-
+# Core Framework
 fastapi==0.109.0
 uvicorn==0.27.0
 pydantic==2.6.0
 python-dotenv==1.0.1
-nest_asyncio==1.6.0
-PyGithub==2.2.0
-playwright==1.41.1
+
+# LLM Providers
+groq==1.0.0
 requests==2.31.0
-google-generativeai==0.3.2
+
+# Tools
+PyGithub==2.2.0
+beautifulsoup4==4.12.3
+
+# Utilities
 jsonschema==4.21.0

@@ -10,12 +10,11 @@ import {
   ChevronRight,
   User,
   Activity,
-  CheckCircle2,
-  AlertCircle,
 } from "lucide-react";
 import "./App.css";
 
 const API_URL = "http://127.0.0.1:8000/query";
+const HEALTH_URL = "http://127.0.0.1:8000/health";
 
 // --- Components ---
 
@@ -36,7 +35,7 @@ const ToolTrace = ({ tool, result }) => {
     try {
       const obj = typeof data === "string" ? JSON.parse(data) : data;
       return JSON.stringify(obj, null, 2);
-    } catch (e) {
+    } catch {
       return String(data);
     }
   };
@@ -62,8 +61,6 @@ const ToolTrace = ({ tool, result }) => {
   );
 };
 
-// frontend/src/App.jsx (Partial Update - Replace the Message component)
-
 const Message = ({ msg }) => {
   const isUser = msg.sender === "user";
 
@@ -78,8 +75,7 @@ const Message = ({ msg }) => {
           {isUser ? "You" : "Swarm Orchestrator"}
         </div>
 
-        {/* The swarm might call several tools before answering */}
-        {msg.toolCalls && msg.toolCalls.length > 0 && (
+        {msg.toolCalls?.length > 0 && (
           <div className="swarm-chain">
             <div className="swarm-label">Swarm Thought Process:</div>
             {msg.toolCalls.map((call, idx) => (
@@ -106,34 +102,27 @@ const App = () => {
       toolCalls: [],
     },
   ]);
+
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isBackendOnline, setIsBackendOnline] = useState(false);
   const scrollRef = useRef(null);
 
+  // --- HEALTH CHECK (ONE TIME) ---
   const checkBackendStatus = useCallback(async () => {
     try {
-      const response = await fetch(API_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user_query: "health check",
-          session_id: "health-check",
-        }),
-      });
-      setIsBackendOnline(response.ok);
-    } catch (error) {
+      const res = await fetch(HEALTH_URL);
+      setIsBackendOnline(res.ok);
+    } catch {
       setIsBackendOnline(false);
     }
   }, []);
 
   useEffect(() => {
     checkBackendStatus();
-    const interval = setInterval(checkBackendStatus, 5000);
-    return () => clearInterval(interval);
   }, [checkBackendStatus]);
 
-  // Auto-scroll
+  // Auto scroll
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -145,10 +134,12 @@ const App = () => {
     if (!input.trim() || isLoading) return;
 
     const userQuery = input.trim();
+
     setMessages((prev) => [
       ...prev,
       { sender: "user", text: userQuery, toolCalls: [] },
     ]);
+
     setInput("");
     setIsLoading(true);
 
@@ -174,10 +165,10 @@ const App = () => {
           toolCalls: data.tool_calls_executed || [],
         },
       ]);
-    } catch (error) {
+    } catch (err) {
       setMessages((prev) => [
         ...prev,
-        { sender: "agent", text: `Error: ${error.message}`, toolCalls: [] },
+        { sender: "agent", text: err.message, toolCalls: [] },
       ]);
     } finally {
       setIsLoading(false);
@@ -186,7 +177,6 @@ const App = () => {
 
   return (
     <div className="app-layout">
-      {/* Header */}
       <header className="header">
         <div className="brand">
           <div className="brand-icon-wrapper">
@@ -203,7 +193,6 @@ const App = () => {
         </div>
       </header>
 
-      {/* Chat Area */}
       <div className="chat-container" ref={scrollRef}>
         {messages.map((msg, idx) => (
           <Message key={idx} msg={msg} />
@@ -214,31 +203,23 @@ const App = () => {
             <div className="avatar agent">
               <Cpu size={18} />
             </div>
-            <div className="thinking">
-              <span className="dot-pulse"></span>
-              <span className="dot-pulse"></span>
-              <span className="dot-pulse"></span>
-              <span style={{ marginLeft: 8 }}>Processing Request...</span>
-            </div>
+            <div className="thinking">Processing Request...</div>
           </div>
         )}
       </div>
 
-      {/* Input Area */}
       <div className="input-area">
         <form onSubmit={handleSend} className="input-form">
           <input
-            type="text"
             className="input-field"
             placeholder={
-              isBackendOnline
-                ? "Ask me to read a file, search Google, or check GitHub..."
-                : "Waiting for backend..."
+              isBackendOnline ? "Ask me anything..." : "Waiting for backend..."
             }
             value={input}
             onChange={(e) => setInput(e.target.value)}
             disabled={!isBackendOnline || isLoading}
           />
+
           <button
             type="submit"
             className="send-button"
