@@ -1,0 +1,7 @@
+# Terminal 1 — Backend
+cd "e:\Major Project\backend"
+C:\Python311\python.exe -m uvicorn server:app --reload --port 8000
+
+# Terminal 2 — Frontend
+cd "e:\Major Project\frontend"
+npm run dev

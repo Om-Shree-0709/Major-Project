@@ -1,0 +1,204 @@
+================================================================================
+         UNIFIED MCP FRAMEWORK — SALES VIDEO SCRIPT
+         "The AI Agent Platform That Does Everything"
+================================================================================
+         [Intended Duration: ~3 to 4 minutes | Tone: Professional, Confident]
+================================================================================
+
+
+--------------------------------------------------------------------------------
+[INTRO — 0:00 to 0:25]
+--------------------------------------------------------------------------------
+
+[SPEAKER — facing camera, confident tone]
+
+"What if you had an AI assistant that didn't just answer questions...
+but actually DID things for you?
+
+Searched the web. Wrote and saved files. Browsed websites.
+Checked GitHub repositories. Checked the weather.
+Ran code. All by itself. In real time.
+
+That's exactly what we've built."
+
+[Text on screen: "Introducing — Unified MCP Framework"]
+[Subtitle: "A Full-Stack AI Agent System powered by the Model Context Protocol"]
+
+
+--------------------------------------------------------------------------------
+[PROBLEM — 0:25 to 0:55]
+--------------------------------------------------------------------------------
+
+[SPEAKER]
+
+"Most AI chatbots are stuck in a box.
+You ask them something — they give you text back.
+But they can't create a file. They can't search a live website.
+They can't touch your GitHub. They just... talk.
+
+That's a problem for developers, businesses, and anyone
+who needs AI to actually get work done."
+
+[Show split screen — a basic chatbot giving a text response VS this system
+ actually browsing a site and writing a file]
+
+
+--------------------------------------------------------------------------------
+[THE SOLUTION — 0:55 to 1:40]
+--------------------------------------------------------------------------------
+
+[SPEAKER]
+
+"We built a smarter system. One that thinks AND acts.
+
+It's called the Unified MCP Framework — and it's built on a powerful idea:
+the Model Context Protocol. Instead of one AI doing everything,
+we have a team of AI agents, each with a specific role,
+working together to complete your request."
+
+[Diagram on screen: Manager → Researcher → Coder → Tools]
+
+"There's a Manager agent — it breaks your request into subtasks
+and delegates them.
+
+A Researcher agent — it browses the internet, finds information,
+and comes back with real data.
+
+And a Coder agent — it writes files, reads code, pushes to GitHub.
+
+All talking to each other. All working together. All for you."
+
+
+--------------------------------------------------------------------------------
+[CAPABILITIES — 1:40 to 2:35]
+--------------------------------------------------------------------------------
+
+[SPEAKER]
+
+"Here's what it can actually do — right now, today."
+
+[Show live demo clips or screen recording for each point]
+
+"ONE — Live Web Search.
+Just say 'Find the latest news on AI security trends.'
+It opens a browser, searches the web, extracts the content,
+and brings you a clean, summarized answer."
+
+"TWO — File Operations — Securely.
+Say 'Create a report called summary.txt with the results.'
+It writes that file automatically — inside a sandboxed directory,
+so it's safe and controlled."
+
+"THREE — GitHub Integration.
+Connect your GitHub account and ask it to list your repositories,
+read a specific file from a repo, or even update code with a commit.
+All from a simple text prompt."
+
+"FOUR — Weather Data — No API key needed.
+Ask 'What's the weather in Mumbai this week?'
+It fetches real-time data and gives you a 7-day forecast."
+
+"FIVE — System Information.
+Need to know your CPU usage, memory, disk space, running processes?
+Just ask. It has direct access to system diagnostics."
+
+"SIX — Code Execution.
+Ask it to run a Python snippet, test a calculation, validate some logic.
+It executes code safely and returns the result."
+
+[Text on screen bubble: "6 Powerful Tools. One Simple Chat Interface."]
+
+
+--------------------------------------------------------------------------------
+[THE INTELLIGENCE BEHIND IT — 2:35 to 3:00]
+--------------------------------------------------------------------------------
+
+[SPEAKER]
+
+"And the best part? It uses completely FREE, state-of-the-art AI models.
+
+Llama 3.3 70B via Groq — one of the fastest large language models available.
+And GPT-4o-mini via GitHub Models — as a smart backup.
+
+Both are free to use. The system automatically switches between them
+to make sure you always get a response."
+
+[Text on screen: "No expensive API bills. No single point of failure.
+ Automatic fallback. Always available."]
+
+"Everything runs through a React frontend — clean, modern, and intuitive.
+And the backend is powered by FastAPI — production-ready and blazing fast."
+
+
+--------------------------------------------------------------------------------
+[TRANSPARENCY & TRUST — 3:00 to 3:20]
+--------------------------------------------------------------------------------
+
+[SPEAKER]
+
+"One thing we're really proud of — transparency.
+
+Every single action the AI takes is shown to you in the interface.
+Which tool was called. What data was returned. What decision was made.
+
+You're never in the dark. You always know what's happening and why.
+That's how AI should work."
+
+[Show the "Tool Trace" panel on the UI]
+
+
+--------------------------------------------------------------------------------
+[FUTURE VISION — 3:20 to 3:45]
+--------------------------------------------------------------------------------
+
+[SPEAKER]
+
+"And this is just the beginning.
+
+In the next phase, we plan to add:
+
+→ Email and Calendar integration — so it can schedule meetings, send summaries
+→ Database querying — connect it directly to your SQL or NoSQL database
+→ More AI personas — specialized agents for data analysis, legal review, etc.
+→ Voice interface — talk to it like you'd talk to a colleague
+→ Multi-user support — teams working with the same AI swarm together
+
+This framework is designed to GROW with your needs.
+It's not a product. It's a platform."
+
+[Text on screen: "Extensible. Modular. Ready for Enterprise."]
+
+
+--------------------------------------------------------------------------------
+[CALL TO ACTION / CLOSE — 3:45 to 4:00]
+--------------------------------------------------------------------------------
+
+[SPEAKER]
+
+"If you want an AI that doesn't just answer — but ACTS —
+
+If you want full transparency, full control, and zero vendor lock-in —
+
+Then let's talk. This is that system."
+
+[Show system name, contact info, and project link on screen]
+
+[SPEAKER — with a confident smile]
+
+"The future of AI agents is here. And we built it."
+
+[Fade to logo / outro]
+
+
+================================================================================
+                     END OF SCRIPT
+================================================================================
+
+NOTES FOR PRESENTER:
+- Keep energy high but professional throughout.
+- Pause between each capability (ONE, TWO, THREE...) for impact.
+- For live demo sections, prepare a pre-recorded screen capture in advance.
+- The "Future Vision" section can be customized based on what your client cares about most.
+- Total runtime target: 3 minutes 45 seconds to 4 minutes.
+
+================================================================================

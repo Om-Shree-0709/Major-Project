@@ -3,7 +3,7 @@ import React, { useState, useRef, useEffect } from "react";
 import { 
   LuBot, LuUser, LuGlobe, LuFolder, LuGitBranch,
   LuArrowRight, LuLoader, LuChevronDown, 
-  LuChevronRight, LuAlignLeft 
+  LuChevronRight, LuAlignLeft, LuCloud, LuTerminal, LuMonitor
 } from "react-icons/lu";
 import "./ChatInterface.css";
 
@@ -142,17 +142,29 @@ const ChatInterface = () => {
           <div>
             <div className="sidebar-section-title">TOOLS</div>
             <div className="sidebar-tools-list">
-              <div className="tool-list-item">
+              <div className="tool-list-item" onClick={() => setInput("Search for the latest news about AI and machine learning")} title="Click to test">
                 <span className="tool-list-icon"><LuGlobe size={16} /></span>
                 <span>Browser Search</span>
               </div>
-              <div className="tool-list-item">
+              <div className="tool-list-item" onClick={() => setInput("Create a file called hello.txt with the content: Hello from MCP Agent!")} title="Click to test">
                 <span className="tool-list-icon"><LuFolder size={16} /></span>
                 <span>File System</span>
               </div>
-              <div className="tool-list-item">
+              <div className="tool-list-item" onClick={() => setInput("List all my GitHub repositories")} title="Click to test">
                 <span className="tool-list-icon"><LuGitBranch size={16} /></span>
                 <span>GitHub</span>
+              </div>
+              <div className="tool-list-item" onClick={() => setInput("What is the current weather in Mumbai?")} title="Click to test">
+                <span className="tool-list-icon"><LuCloud size={16} /></span>
+                <span>Weather</span>
+              </div>
+              <div className="tool-list-item" onClick={() => setInput("Run this Python code: print('Hello from Code Runner!'); print(2 + 2)")} title="Click to test">
+                <span className="tool-list-icon"><LuTerminal size={16} /></span>
+                <span>Code Runner</span>
+              </div>
+              <div className="tool-list-item" onClick={() => setInput("What files are in my sandbox and what is the system info?")} title="Click to test">
+                <span className="tool-list-icon"><LuMonitor size={16} /></span>
+                <span>System Info</span>
               </div>
             </div>
           </div>

@@ -136,10 +136,16 @@ async def lifespan(app: FastAPI):
     from filesystem_server import FilesystemMCPServer
     from browser_server import BrowserMCPServer
     from github_server import GitHubMCPServer
+    from weather_server import WeatherMCPServer
+    from code_executor_server import CodeExecutorMCPServer
+    from system_info_server import SystemInfoMCPServer
     
     SERVERS["filesystem"] = FilesystemMCPServer()
     SERVERS["browser"] = BrowserMCPServer()
     SERVERS["github"] = GitHubMCPServer()
+    SERVERS["weather"] = WeatherMCPServer()
+    SERVERS["code_executor"] = CodeExecutorMCPServer()
+    SERVERS["system_info"] = SystemInfoMCPServer()
     logger.info(f"✅ {len(SERVERS)} servers loaded")
 
     logger.info("=" * 50)
