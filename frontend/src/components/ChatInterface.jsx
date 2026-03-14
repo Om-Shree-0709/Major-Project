@@ -1,20 +1,46 @@
 // src/components/ChatInterface.jsx
 import React, { useState, useRef, useEffect } from "react";
+import { 
+  LuBot, LuUser, LuGlobe, LuFolder, LuGitBranch,
+  LuArrowRight, LuLoader, LuChevronDown, 
+  LuChevronRight, LuAlignLeft 
+} from "react-icons/lu";
 import "./ChatInterface.css";
+
+const TraceBlock = ({ call }) => {
+  const [expanded, setExpanded] = useState(false);
+  
+  return (
+    <div className="tool-trace-block">
+      <div className="tool-trace-header" onClick={() => setExpanded(!expanded)}>
+        <div className="tool-trace-header-left">
+          <span className="tool-server-badge">{call.tool ? call.tool.split('.')[0] : "tool"}</span>
+          <span className="tool-name-text">{call.tool || "unknown_tool"}</span>
+        </div>
+        <div className="tool-chevron">
+          {expanded ? <LuChevronDown size={14} /> : <LuChevronRight size={14} />}
+        </div>
+      </div>
+      {expanded && (
+        <div className="tool-trace-body">
+          {JSON.stringify(call.args || call, null, 2)}
+        </div>
+      )}
+    </div>
+  );
+};
 
 const ChatInterface = () => {
   const [messages, setMessages] = useState([
     {
       id: "system-1",
       sender: "system",
-      text: "👋 Hey! I'm your MCP Orchestrator. Ask me to fetch Bollywood news or any other query. I can access web, files, and GitHub.",
+      text: "Hello. I'm your MCP Agent. I can access the web, filesystem, and GitHub to assist you with tasks.",
     },
   ]);
 
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [comparison, setComparison] = useState(null);
-  const [showComparison, setShowComparison] = useState(false);
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -23,12 +49,15 @@ const ChatInterface = () => {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, showComparison]);
+  }, [messages]);
 
-  // Fetch Bollywood News
-  const handleFetchNews = async () => {
-    const query = "Fetch the latest Bollywood and pop culture news";
-    await sendQuery(query);
+  // Handle clear chat
+  const handleClearChat = () => {
+    setMessages([{
+      id: "system-1",
+      sender: "system",
+      text: "Hello. I'm your MCP Agent. I can access the web, filesystem, and GitHub to assist you with tasks.",
+    }]);
   };
 
   // Send Query
@@ -61,16 +90,13 @@ const ChatInterface = () => {
 
       const data = await response.json();
 
-      // Add agent response
       let answerText = data.final_answer || "No answer generated";
-
-      // If answer mentions file creation, add helpful note
       if (
         answerText.toLowerCase().includes("file") ||
         answerText.toLowerCase().includes("created") ||
         answerText.toLowerCase().includes("saved")
       ) {
-        answerText += "\n\n📁 Files are saved to: `backend/mcp_sandbox/`";
+        answerText += "\n\nFiles are saved to: `backend/mcp_sandbox/`";
       }
 
       const agentMsg = {
@@ -84,7 +110,7 @@ const ChatInterface = () => {
       const errorMsg = {
         id: `msg-${Date.now()}`,
         sender: "agent",
-        text: `❌ Error: ${error.message}`,
+        text: `Error: ${error.message}`,
       };
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
@@ -92,330 +118,138 @@ const ChatInterface = () => {
     }
   };
 
-  // Handle form submit
   const handleSubmit = (e) => {
     e.preventDefault();
     sendQuery();
   };
 
-  // Run Comparison
-  const handleRunComparison = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch(
-        "http://127.0.0.1:8000/multi-agent/compare",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            query:
-              "fetch latest technology and bollywood news and create a formatted file",
-          }),
-        },
-      );
-
-      if (!response.ok) throw new Error("Comparison failed");
-
-      const data = await response.json();
-      setComparison(data.comparison);
-      setShowComparison(true);
-    } catch (error) {
-      const errorMsg = {
-        id: `msg-${Date.now()}`,
-        sender: "agent",
-        text: `❌ Comparison Error: ${error.message}`,
-      };
-      setMessages((prev) => [...prev, errorMsg]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
     <div className="chat-layout">
-      {/* Left Sidebar */}
+      {/* Sidebar */}
       <aside className="sidebar">
         <div className="sidebar-header">
-          <span className="sidebar-icon">⚙️</span>
-          <h2>Tools</h2>
+          <div className="header-left">
+            <div className="header-logo"><LuAlignLeft size={16} /></div>
+            <div className="header-title">MCP Agent</div>
+          </div>
+          <div className="header-right">
+            <div className="status-dot"></div>
+            <div className="status-text">Connected</div>
+          </div>
         </div>
 
-        <div className="sidebar-actions">
-          <button
-            className="action-btn action-btn-primary"
-            onClick={handleFetchNews}
-            disabled={loading}
-          >
-            <span className="btn-icon">📰</span>
-            <span className="btn-text">Fetch Bollywood News</span>
-          </button>
-
-          <button
-            className="action-btn action-btn-secondary"
-            onClick={handleRunComparison}
-            disabled={loading}
-          >
-            <span className="btn-icon">⚡</span>
-            <span className="btn-text">Run Comparison</span>
-          </button>
+        <div className="sidebar-content">
+          <div>
+            <div className="sidebar-section-title">TOOLS</div>
+            <div className="sidebar-tools-list">
+              <div className="tool-list-item">
+                <span className="tool-list-icon"><LuGlobe size={16} /></span>
+                <span>Browser Search</span>
+              </div>
+              <div className="tool-list-item">
+                <span className="tool-list-icon"><LuFolder size={16} /></span>
+                <span>File System</span>
+              </div>
+              <div className="tool-list-item">
+                <span className="tool-list-icon"><LuGitBranch size={16} /></span>
+                <span>GitHub</span>
+              </div>
+            </div>
+          </div>
+          <div style={{ marginTop: 'auto', marginBottom: '16px' }}>
+            <button 
+              onClick={handleClearChat}
+              disabled={loading}
+              style={{
+                width: '100%',
+                padding: '8px 12px',
+                background: 'transparent',
+                border: '1px solid var(--border)',
+                borderRadius: '4px',
+                color: 'var(--text-secondary)',
+                fontSize: '13px',
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--bg-hover)'; e.currentTarget.style.color = 'var(--text-primary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--text-secondary)'; }}
+            >
+              Clear Chat
+            </button>
+          </div>
         </div>
 
-        <div className="sidebar-info">
-          <h3>About</h3>
-          <p>This is a Multi-Agent MCP Orchestrator that can:</p>
-          <ul>
-            <li>🌐 Browse the web</li>
-            <li>📁 Access files</li>
-            <li>🔗 Interact with GitHub</li>
-            <li>⚡ Compare execution strategies</li>
-          </ul>
-
-          <h3 style={{ marginTop: "1rem" }}>📂 File Storage</h3>
-          <p style={{ fontSize: "0.8rem", color: "#64748b" }}>
-            All files created by the orchestrator are saved in:
-          </p>
-          <code
-            style={{
-              display: "block",
-              background: "#0f172a",
-              padding: "0.5rem",
-              borderRadius: "0.375rem",
-              fontSize: "0.75rem",
-              marginTop: "0.5rem",
-              color: "#a5f3fc",
-              wordBreak: "break-all",
-            }}
-          >
-            backend/mcp_sandbox/
-          </code>
+        <div className="sidebar-footer">
+          <div className="model-info">Groq · llama-3.3-70b</div>
         </div>
       </aside>
 
       {/* Main Chat Area */}
       <main className="chat-container">
-        {showComparison && comparison ? (
-          <ComparisonView
-            comparison={comparison}
-            onBack={() => setShowComparison(false)}
-          />
-        ) : (
-          <>
-            {/* Messages */}
-            <div className="messages-area">
-              {messages.map((msg) => (
-                <div key={msg.id} className={`message message-${msg.sender}`}>
-                  <div className="message-avatar">
-                    {msg.sender === "user"
-                      ? "👤"
-                      : msg.sender === "system"
-                        ? "🤖"
-                        : "🔧"}
-                  </div>
-                  <div className="message-content">
-                    <div className="message-text">{msg.text}</div>
-
-                    {/* Tool Calls */}
-                    {msg.toolCalls && msg.toolCalls.length > 0 && (
-                      <div className="tool-calls">
-                        <div className="tool-label">Tool Calls:</div>
-                        {msg.toolCalls.map((call, idx) => (
-                          <div key={idx} className="tool-item">
-                            <code>{call.tool}</code>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+        {/* Messages */}
+        <div className="messages-area">
+          {messages.map((msg) => (
+            <div key={msg.id} className={`message message-${msg.sender}`}>
+              <div className="message-avatar-circle">
+                {msg.sender === "user" ? <LuUser size={16} /> : <LuBot size={16} />}
+              </div>
+              <div className="message-body">
+                <div className="message-label">
+                  {msg.sender === "user" ? "You" : "MCP Agent"}
                 </div>
-              ))}
+                <div className="message-text">{msg.text}</div>
 
-              {loading && (
-                <div className="message message-system">
-                  <div className="message-avatar">🔄</div>
-                  <div className="message-content">
-                    <div className="loading-dots">
-                      <span></span>
-                      <span></span>
-                      <span></span>
-                    </div>
+                {/* Tool Calls */}
+                {msg.toolCalls && msg.toolCalls.length > 0 && (
+                  <div className="tool-traces-container">
+                    {msg.toolCalls.map((call, idx) => (
+                      <TraceBlock key={idx} call={call} />
+                    ))}
                   </div>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
+                )}
+              </div>
             </div>
+          ))}
 
-            {/* Input Area */}
-            <form onSubmit={handleSubmit} className="input-form">
-              <input
-                type="text"
-                className="input-field"
-                placeholder="Ask me anything... or use the buttons"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                disabled={loading}
-              />
-              <button
-                type="submit"
-                className="send-btn"
-                disabled={loading || !input.trim()}
-              >
-                {loading ? "..." : "→"}
-              </button>
-            </form>
-          </>
-        )}
+          {loading && (
+            <div className="message message-system">
+              <div className="message-avatar-circle">
+                <LuBot size={16} />
+              </div>
+              <div className="message-body">
+                <div className="message-label">MCP Agent</div>
+                <div className="loading-row">
+                  <LuLoader size={14} className="spin" />
+                  <span>Thinking...</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* Input Area */}
+        <div className="input-form">
+          <form className="input-container" onSubmit={handleSubmit}>
+            <input
+              type="text"
+              className="input-field"
+              placeholder="Ask me anything..."
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={loading}
+            />
+            <button
+              type="submit"
+              className={`send-btn ${input.trim() && !loading ? 'active' : ''}`}
+              disabled={loading || !input.trim()}
+            >
+              <LuArrowRight size={16} />
+            </button>
+          </form>
+        </div>
       </main>
-    </div>
-  );
-};
-
-/**
- * Comparison View Component
- */
-const ComparisonView = ({ comparison, onBack }) => {
-  const linear = comparison.linear;
-  const hierarchical = comparison.hierarchical;
-
-  const linearTime = linear?.metrics?.total_time_ms || 0;
-  const hierarchicalTime = hierarchical?.metrics?.total_time_ms || 0;
-  const timeDiff = Math.abs(linearTime - hierarchicalTime);
-  const faster = hierarchicalTime < linearTime ? "HIERARCHICAL" : "LINEAR";
-
-  return (
-    <div className="comparison-view">
-      <button className="back-btn" onClick={onBack}>
-        ← Back to Chat
-      </button>
-
-      <h1>⚡ Execution Strategy Comparison</h1>
-
-      {/* Metrics Comparison */}
-      <section className="comparison-section">
-        <h2>📊 Performance Metrics</h2>
-
-        <div className="metrics-grid">
-          <div className="metric-card metric-linear">
-            <h3>📊 LINEAR</h3>
-            <div className="metric-row">
-              <span>Time:</span>
-              <strong>{linearTime}ms</strong>
-            </div>
-            <div className="metric-row">
-              <span>Tasks:</span>
-              <strong>
-                {linear?.metrics?.completed_tasks}/
-                {linear?.metrics?.total_tasks}
-              </strong>
-            </div>
-            <div className="metric-row">
-              <span>Agents:</span>
-              <strong>{linear?.agents?.length || 0}</strong>
-            </div>
-          </div>
-
-          <div className="metric-card metric-hierarchical">
-            <h3>⚡ HIERARCHICAL</h3>
-            <div className="metric-row">
-              <span>Time:</span>
-              <strong>{hierarchicalTime}ms</strong>
-            </div>
-            <div className="metric-row">
-              <span>Tasks:</span>
-              <strong>
-                {hierarchical?.metrics?.completed_tasks}/
-                {hierarchical?.metrics?.total_tasks}
-              </strong>
-            </div>
-            <div className="metric-row">
-              <span>Agents:</span>
-              <strong>{hierarchical?.agents?.length || 0}</strong>
-            </div>
-          </div>
-        </div>
-
-        <div className="winner-box">
-          <strong>🏆 Winner: {faster}</strong> (Faster by {timeDiff}ms)
-        </div>
-      </section>
-
-      {/* Tool Calls Diagram */}
-      <section className="comparison-section">
-        <h2>🔧 Tool Calls (LINEAR)</h2>
-        <div className="diagram">
-          <ToolCallDiagram toolCalls={linear?.metrics?.tool_invocations} />
-        </div>
-      </section>
-
-      <section className="comparison-section">
-        <h2>🔧 Tool Calls (HIERARCHICAL)</h2>
-        <div className="diagram">
-          <ToolCallDiagram
-            toolCalls={hierarchical?.metrics?.tool_invocations}
-          />
-        </div>
-      </section>
-
-      {/* Data Flow */}
-      <section className="comparison-section">
-        <h2>🔄 Data Flow (LINEAR)</h2>
-        <div className="data-flow">
-          <DataFlowDiagram flows={linear?.data_flow?.data_flows} />
-        </div>
-      </section>
-
-      <section className="comparison-section">
-        <h2>🔄 Data Flow (HIERARCHICAL)</h2>
-        <div className="data-flow">
-          <DataFlowDiagram flows={hierarchical?.data_flow?.data_flows} />
-        </div>
-      </section>
-    </div>
-  );
-};
-
-/**
- * Tool Call Diagram Component
- */
-const ToolCallDiagram = ({ toolCalls }) => {
-  if (!toolCalls || Object.keys(toolCalls).length === 0) {
-    return <div className="empty-diagram">No tool calls recorded</div>;
-  }
-
-  return (
-    <div className="tool-diagram">
-      {Object.entries(toolCalls).map(([tool, count], idx) => (
-        <div key={tool} className="tool-flow-item">
-          <div className="tool-name">{tool}</div>
-          <div className="tool-arrow">→</div>
-          <div className="tool-count">{count}x</div>
-        </div>
-      ))}
-    </div>
-  );
-};
-
-/**
- * Data Flow Diagram Component - Arrow format like markdown
- */
-const DataFlowDiagram = ({ flows }) => {
-  if (!flows || flows.length === 0) {
-    return <div className="empty-diagram">No data flows recorded</div>;
-  }
-
-  return (
-    <div className="data-flow-diagram">
-      {flows.slice(0, 5).map((flow, idx) => (
-        <div key={idx} className="flow-line">
-          <code className="flow-source">{flow.source?.substring(0, 8)}</code>
-          <span className="flow-arrow">→</span>
-          <code className="flow-target">{flow.target}</code>
-          <span className="flow-tool">({flow.tool})</span>
-        </div>
-      ))}
-      {flows.length > 5 && (
-        <div className="flow-more">... and {flows.length - 5} more flows</div>
-      )}
     </div>
   );
 };

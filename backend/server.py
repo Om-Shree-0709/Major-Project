@@ -24,8 +24,7 @@ try:
 except ImportError:
     HAVE_GROQ = False
 
-from swarm_manager import PERSONAS, SwarmContext
-from multi_agent_swarm import MultiAgentSwarm, ExecutionStrategy
+from swarm_manager import PERSONAS, SwarmContext, TaskStatus
 from mcp_core import IMCPExternalServer, MCPTool
 
 load_dotenv()
@@ -127,8 +126,13 @@ def init_llm():
     logger.info(f"🎯 {len(LLM.providers)} providers ready")
     return True
 
-def load_servers():
-    """Load MCP tool servers."""
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize resources on startup."""
+    logger.info("🚀 Starting Unified MCP Framework...")
+    init_llm()
+    
+    # Load MCP tool servers
     from filesystem_server import FilesystemMCPServer
     from browser_server import BrowserMCPServer
     from github_server import GitHubMCPServer
@@ -138,24 +142,6 @@ def load_servers():
     SERVERS["github"] = GitHubMCPServer()
     logger.info(f"✅ {len(SERVERS)} servers loaded")
 
-
-# Global swarm manager instance (created at startup)
-swarm_manager: MultiAgentSwarm = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("=" * 50)
-    logger.info("🚀 UNIFIED MCP FRAMEWORK")
-    logger.info("=" * 50)
-    
-    if not init_llm():
-        logger.warning("⚠️  Starting without LLM!")
-    
-    load_servers()
-    # instantiate global swarm manager after servers are available
-    global swarm_manager
-    swarm_manager = MultiAgentSwarm()
-    
     logger.info("=" * 50)
     logger.info("✅ READY - http://127.0.0.1:8000")
     logger.info("=" * 50)
@@ -263,33 +249,28 @@ async def query(q: Query):
     # ==================== PHASE 1: ANALYSIS & TASK DECOMPOSITION ====================
     logger.info("📋 PHASE 1: Analyzing query and decomposing into tasks...")
     
-    # Get available tools for context
-    tools = []
-    for srv in SERVERS.values():
-        try:
-            tools.extend(srv.list_tools())
-        except:
-            continue
-
-    tools_desc = "\n".join([f"- {t.name}: {t.description}" for t in tools])
+    # Manager Persona context
+    manager_prompt = PERSONAS["Manager"]["prompt"]
     
-    analysis_system = """You are a task analyzer. Respond ONLY with valid JSON (no other text).
+    analysis_system = f"""{manager_prompt}
 
-Task: Classify the user query into a task type and identify required tools.
+You are analyzing the user query. Respond ONLY with valid JSON (no other text).
+
+Task: Classify the user query into a task type and identify the precise required tools, then outline the necessary subtasks.
 
 RESPOND WITH EXACTLY THIS JSON FORMAT (and nothing else):
-{
+{{
   "task_type": "simple",
   "explanation": "brief explanation",
   "subtasks": ["task1", "task2"]
-}
+}}
 
 Task types:
 - simple: General questions/reasoning
 - research: Needs web search (Browser MCP)
 - code: Needs file operations (Filesystem MCP)
 - github: Needs repo operations (GitHub MCP)
-- complex: Multiple servers needed"""
+- complex: Needs both research and code operations"""
 
     analysis_user = f"""User Query: {q.user_query}
 
@@ -316,24 +297,43 @@ Respond with ONLY valid JSON (no markdown, no extra text)."""
 
     # ==================== PHASE 2: EXECUTE SUBTASKS ====================
     context.workflow_phase = "execution"
-    max_iterations = 5 if task_type in ["complex", "research_and_code"] else 3
     
-    for iteration in range(max_iterations):
-        logger.info(f"🔄 Iteration {iteration+1}/{max_iterations}")
+    # Process each subtask, utilizing the appropriate persona
+    for idx, subtask in enumerate(subtasks):
+        logger.info(f"🔄 Executing Subtask {idx+1}/{len(subtasks)}: {subtask}")
+        context.add_event("Manager", f"Delegating Subtask: {subtask}")
         
-        # Build list of ALL available tools
-        all_tools = []
-        for srv in SERVERS.values():
-            try:
-                for tool in srv.list_tools():
-                    all_tools.append(tool.name)
-            except:
-                pass
+        # Determine which persona to use
+        current_persona = "Manager"
+        if task_type == "research" or (task_type == "complex" and ("search" in subtask.lower() or "find" in subtask.lower() or "research" in subtask.lower())):
+            current_persona = "Researcher"
+        elif task_type in ["code", "github"] or (task_type == "complex" and ("code" in subtask.lower() or "create" in subtask.lower() or "write" in subtask.lower() or "file" in subtask.lower())):
+            current_persona = "Coder"
+        elif task_type == "simple":
+             # For simple tasks, we can just skip to final phase if no tools are needed,
+             # but we'll run one iteration with the Manager just to get it answered quickly.
+             pass
+
+        logger.info(f"🎭 Using Persona: {current_persona}")
+        persona = PERSONAS[current_persona]
         
-        tools_list = "\n".join([f"  - {t}" for t in all_tools])
+        # Build list of tools ALOWED for this persona
+        allowed_servers = persona.get("tools", [])
+        available_tools = []
+        for srv_name, srv in SERVERS.items():
+            if "all" in allowed_servers or srv_name in allowed_servers:
+                try:
+                    for tool in srv.list_tools():
+                        available_tools.append(tool.name)
+                except:
+                    pass
         
-        # Enhanced system prompt with tool parameter examples
-        system = f"""You are a tool executor. You MUST respond with ONLY valid JSON, no other text.
+        tools_list = "\n".join([f"  - {t}" for t in available_tools])
+        
+        # System prompt using Persona's core prompt + JSON execution instructions
+        system = f"""{persona['prompt']}
+
+You must execute the current subtask. Respond with ONLY valid JSON, no other text.
 
 AVAILABLE TOOLS (use EXACT names):
 {tools_list}
@@ -356,7 +356,7 @@ Browser Tools:
   - browser.browse_website: {{"url": "https://example.com"}}
 
 GitHub Tools:
-  - github.list_repos: {{"}}
+  - github.list_repos: {{}}
   - github.get_repo: {{"repo_name": "repo-name"}}
   - github.read_file: {{"repo_name": "repo", "path": "file.py"}}
   - github.create_or_update_file: {{"repo_name": "repo", "path": "file.py", "content": "code", "message": "commit message"}}
@@ -371,10 +371,10 @@ Option 1 - Execute a tool (include ALL required args):
   "args": {{"required_param": "value", "another_param": "value"}}
 }}
 
-Option 2 - Provide final answer:
+Option 2 - Provide answer/result for this subtask:
 {{
   "action": "answer",
-  "answer": "Your final answer text here"
+  "answer": "Your detailed findings/results for this subtask"
 }}
 
 CRITICAL RULES:
@@ -388,16 +388,16 @@ CRITICAL RULES:
         
         # Build user prompt with context about file creation if needed
         file_guidance = ""
-        if requires_file_creation:
-            file_guidance = "\n\n⚠️  IMPORTANT: This query asks you to create a file. You MUST use filesystem.write_file to save the content to a file with the requested filename. Do NOT skip this step!"
+        if requires_file_creation and current_persona == "Coder":
+            file_guidance = "\n\n⚠️ IMPORTANT: You must use filesystem.write_file to create the file requested."
         
-        user = f"""Current query: {q.user_query}
+        user = f"""Original query: {q.user_query}
+Current Subtask to execute: {subtask}
 
 Recent context:
 {context_str}{file_guidance}
 
-What is your next action? Respond with ONLY valid JSON.
-Use EXACT tool names from the list above."""
+What is your next action for this subtask? Respond with ONLY valid JSON."""
 
         try:
             exec_resp = LLM.call(system, user)
@@ -463,13 +463,10 @@ Use EXACT tool names from the list above."""
                             logger.error(f"❌ Failed to auto-write file: {e}")
         
         if action == "answer":
-            final_answer = decision.get("answer", "No answer provided")
-            logger.info("✅ Answer ready")
-            context.add_event("Manager", f"Final Answer: {final_answer}")
-            return Response(
-                final_answer=final_answer,
-                tool_calls_executed=tool_calls
-            )
+            subtask_answer = decision.get("answer", "No result provided for this subtask")
+            logger.info(f"✅ Subtask {idx+1} complete")
+            context.add_event(current_persona, f"Subtask Result: {subtask_answer}")
+            continue # Move on to the next subtask
 
         # Execute tool if requested
         if action == "tool":
@@ -522,17 +519,23 @@ Use EXACT tool names from the list above."""
             else:
                 logger.warning(f"⚠️  Unknown server: {srv_name}")
 
-        # Check if all tasks are done
-        if context.is_all_tasks_completed():
-            logger.info("✅ All tasks completed")
-            break
+        # Give the agent a few tries to complete the subtask if it opted to use a tool
+        # In a real swarm system we could nest a while loop here, but for simplicity
+        # we assume one tool call per subtask iteration, or we loop max 3 times per subtask.
+        # We can simulate letting the subtask continue slightly by iterating on the tool results:
+        # Just append it and let the next subtask or final synthesis handle it.
+        context.add_event(current_persona, f"Completed tool execution for subtask: {subtask}")
 
     # ==================== FINAL RESPONSE ====================
     logger.info("📋 Generating final response...")
     context.add_event("Manager", "Generating final response...")
     
-    final_system = """You are a response synthesizer. Provide a clear, helpful final answer.
-Do NOT include JSON or any special formatting. Just provide the answer."""
+    final_system_prompt = PERSONAS["Manager"]["prompt"]
+    final_system = f"""{final_system_prompt}
+
+You are synthesizing the final response for the user after all subtasks have been completed by your team. 
+Provide a clear, helpful final answer based on the context and work completed.
+Do NOT include JSON or any special formatting just provide the direct answer to the user."""
 
     final_user = f"""Original query: {q.user_query}
 
@@ -600,325 +603,7 @@ async def swarm_status():
         "llm_providers": [p["name"] for p in LLM.providers]
     }
 
-# Multi-Agent Comparison Endpoints
-@app.post("/multi-agent/compare")
-async def compare_execution_strategies(request: dict):
-    """Compare LINEAR vs HIERARCHICAL execution strategies for a task."""
-    try:
-        query = request.get("query", "")
-        if not query:
-            return {"error": "Query is required"}, 400
 
-        # Build a list of available tool names from loaded servers
-        all_tools = []
-        for srv in SERVERS.values():
-            try:
-                for t in srv.list_tools():
-                    all_tools.append(t.name)
-            except Exception:
-                continue
-
-        # Run comparison using two fresh swarm instances to avoid cross-contamination
-        linear_swarm = MultiAgentSwarm()
-        hierarchical_swarm = MultiAgentSwarm()
-
-        # Spawn agents for each swarm
-        linear_agents = linear_swarm.analyze_task_and_spawn_agents(query, all_tools)
-        hierarchical_agents = hierarchical_swarm.analyze_task_and_spawn_agents(query, all_tools)
-
-        # Decompose and assign tasks
-        linear_tasks = linear_swarm.decompose_task(query)
-        hierarchical_tasks = hierarchical_swarm.decompose_task(query)
-
-        linear_swarm.assign_tasks_to_agents(linear_tasks, linear_agents)
-        hierarchical_swarm.assign_tasks_to_agents(hierarchical_tasks, hierarchical_agents)
-
-        # Execute both strategies and collect metrics and data flows
-        linear_metrics = await linear_swarm.execute_tasks(ExecutionStrategy.LINEAR)
-        hierarchical_metrics = await hierarchical_swarm.execute_tasks(ExecutionStrategy.HIERARCHICAL)
-
-        return {
-            "success": True,
-            "query": query,
-            "comparison": {
-                "linear": {
-                    "metrics": linear_metrics.__dict__,
-                    "data_flow": linear_swarm.get_data_flow_visualization(),
-                    "agents": [a.to_dict() for a in linear_agents],
-                    "tasks": [{
-                        "id": t.id,
-                        "description": t.description,
-                        "status": t.status.value,
-                        "dependencies": [d.task_id for d in t.dependencies]
-                    } for t in linear_tasks],
-                    "execution_plan": linear_swarm.get_execution_plan(ExecutionStrategy.LINEAR)
-                },
-                "hierarchical": {
-                    "metrics": hierarchical_metrics.__dict__,
-                    "data_flow": hierarchical_swarm.get_data_flow_visualization(),
-                    "agents": [a.to_dict() for a in hierarchical_agents],
-                    "tasks": [{
-                        "id": t.id,
-                        "description": t.description,
-                        "status": t.status.value,
-                        "dependencies": [d.task_id for d in t.dependencies]
-                    } for t in hierarchical_tasks],
-                    "execution_plan": hierarchical_swarm.get_execution_plan(ExecutionStrategy.HIERARCHICAL)
-                }
-            }
-        }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "type": type(e).__name__
-        }, 500
-
-
-@app.post("/multi-agent/fetch-news")
-async def fetch_and_save_news(request: dict):
-    """Fetch Bollywood/pop culture news and save to file with execution flow visualization"""
-    try:
-        from news_fetcher import fetch_bollywood_news, save_news_to_file, format_news_as_markdown
-        import time
-        import os
-
-        execution_logs = []
-        start_time = time.time()
-
-        # Step 1: Spawn agents
-        log_entry = f"[{datetime.now().isoformat()}] [ORCHESTRATOR] Analyzing task: fetch and format news"
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        all_tools = []
-        for srv in SERVERS.values():
-            try:
-                for t in srv.list_tools():
-                    all_tools.append(t.name)
-            except Exception:
-                continue
-
-        # Create a fresh swarm for this task
-        swarm = MultiAgentSwarm()
-        agents = swarm.analyze_task_and_spawn_agents("fetch latest news and create file", all_tools)
-
-        log_entry = f"[{datetime.now().isoformat()}] [SPAWN] {len(agents)} agents spawned"
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-        for agent in agents:
-            log_entry = f"[{datetime.now().isoformat()}] [AGENT] {agent.config.name} ({agent.config.role.value}) ready with {len(agent.config.available_tools)} tools"
-            execution_logs.append(log_entry)
-            logger.info(log_entry)
-
-        # Step 2: Decompose tasks
-        tasks = swarm.decompose_task("fetch news and save to file")
-        log_entry = f"[{datetime.now().isoformat()}] [TASKS] {len(tasks)} subtasks decomposed"
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        # Step 3: Assign tasks to agents
-        swarm.assign_tasks_to_agents(tasks, agents)
-        log_entry = f"[{datetime.now().isoformat()}] [ASSIGN] Tasks assigned to agents"
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        # Step 4: Fetch news data
-        log_entry = f"[{datetime.now().isoformat()}] [BROWSER] Fetching news from sources..."
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        news_items = fetch_bollywood_news()
-        log_entry = f"[{datetime.now().isoformat()}] [BROWSER] ✅ Fetched {len(news_items)} news items"
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        swarm.record_data_flow(
-            source_agent=agents[0].id if agents else "unknown",
-            target_agent="mcp_server",
-            data={"count": len(news_items)},
-            tool_used="browser.search_web"
-        )
-
-        # Step 5: Format news
-        log_entry = f"[{datetime.now().isoformat()}] [FORMATTER] Formatting {len(news_items)} news items as markdown..."
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        formatted_content = format_news_as_markdown(news_items, "Latest Bollywood & Pop Culture News")
-        log_entry = f"[{datetime.now().isoformat()}] [FORMATTER] ✅ Formatted {len(formatted_content)} bytes of content"
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        # Step 6: Save to file in mcp_sandbox
-        log_entry = f"[{datetime.now().isoformat()}] [FILESYSTEM] Writing file to mcp_sandbox..."
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        success, file_path = save_news_to_file(news_items, "news.md", "Latest Bollywood & Pop Culture News")
-
-        if success:
-            log_entry = f"[{datetime.now().isoformat()}] [FILESYSTEM] ✅ File created: {file_path}"
-            execution_logs.append(log_entry)
-            logger.info(log_entry)
-
-            swarm.record_data_flow(
-                source_agent=agents[0].id if agents else "unknown",
-                target_agent="mcp_server",
-                data={"file": file_path},
-                tool_used="filesystem.write_file"
-            )
-        else:
-            log_entry = f"[{datetime.now().isoformat()}] [FILESYSTEM] ❌ Failed: {file_path}"
-            execution_logs.append(log_entry)
-            logger.error(log_entry)
-
-        # Step 7: Verify
-        log_entry = f"[{datetime.now().isoformat()}] [VERIFY] Verifying file..."
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        if success and os.path.exists(file_path):
-            file_size = os.path.getsize(file_path)
-            log_entry = f"[{datetime.now().isoformat()}] [VERIFY] ✅ File verified: {file_size} bytes"
-            execution_logs.append(log_entry)
-            logger.info(log_entry)
-        else:
-            log_entry = f"[{datetime.now().isoformat()}] [VERIFY] ⚠️ File verification failed"
-            execution_logs.append(log_entry)
-            logger.warning(log_entry)
-
-        end_time = time.time()
-        total_time_ms = (end_time - start_time) * 1000
-
-        log_entry = f"[{datetime.now().isoformat()}] [COMPLETE] Task finished in {total_time_ms:.2f}ms"
-        execution_logs.append(log_entry)
-        logger.info(log_entry)
-
-        return {
-            "success": success,
-            "file_path": file_path if success else None,
-            "news_count": len(news_items),
-            "formatted_content": formatted_content,
-            "execution_logs": execution_logs,
-            "total_time_ms": total_time_ms,
-            "agents": [a.to_dict() for a in agents],
-            "data_flow": swarm.get_data_flow_visualization()
-        }
-
-    except Exception as e:
-        error_msg = str(e)
-        logger.error(f"❌ Error in fetch-news: {error_msg}")
-        import traceback
-        traceback.print_exc()
-        return {
-            "success": False,
-            "error": error_msg,
-            "execution_logs": execution_logs
-        }, 500
-
-
-@app.post("/multi-agent/spawn-and-execute")
-async def spawn_and_execute(request: dict):
-    """Spawn dynamic agents for a task and execute it."""
-    try:
-        query = request.get("query", "")
-        execution_mode = request.get("execution_mode", "hierarchical")  # linear, hierarchical, parallel
-
-        if not query:
-            return {"error": "Query is required"}, 400
-
-        # Build list of available tool names
-        all_tools = []
-        for srv in SERVERS.values():
-            try:
-                for t in srv.list_tools():
-                    all_tools.append(t.name)
-            except Exception:
-                continue
-
-        # Spawn agents based on task analysis
-        agents = swarm_manager.analyze_task_and_spawn_agents(query, all_tools)
-
-        # Optionally use LLM to refine the orchestrator agent's persona (name/description/tools)
-        try:
-            for agent in agents:
-                # Only refine orchestrator agents
-                if agent.config.role.name == 'ORCHESTRATOR':
-                    system = "You are an agent persona generator. Respond with JSON only."
-                    user = (
-                        "Create a concise agent persona for handling this user query: '{}' . "
-                        "Respond with JSON in the form {\"name\": string, \"description\": string, \"primary_tools\": [string]} "
-                    ).format(query)
-                    if LLM.providers:
-                        resp = LLM.call(system, user)
-                        try:
-                            persona = extract_json_from_response(resp)
-                            if persona:
-                                # Update agent metadata if provided
-                                if persona.get("name"):
-                                    agent.config.name = persona.get("name")
-                                if persona.get("description"):
-                                    agent.config.description = persona.get("description")
-                                if persona.get("primary_tools") and isinstance(persona.get("primary_tools"), list):
-                                    # Keep only tools that exist in all_tools
-                                    chosen = [t for t in all_tools if any(p in t for p in persona.get("primary_tools"))]
-                                    if chosen:
-                                        agent.config.available_tools = chosen
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-
-        # Decompose task into steps
-        tasks = swarm_manager.decompose_task(query)
-
-        # Assign tasks to agents
-        swarm_manager.assign_tasks_to_agents(tasks, agents)
-
-        # Execute with specified strategy
-        # Map string to ExecutionStrategy enum if needed
-        if isinstance(execution_mode, str):
-            try:
-                exec_mode = ExecutionStrategy(execution_mode.lower())
-            except Exception:
-                exec_mode = ExecutionStrategy.HIERARCHICAL
-        else:
-            exec_mode = execution_mode
-
-        metrics = await swarm_manager.execute_tasks(exec_mode)
-
-        # Get data flow visualization
-        data_flow = swarm_manager.get_data_flow_visualization()
-
-        return {
-            "success": True,
-            "query": query,
-            "execution_mode": exec_mode.value,
-            "agents_spawned": len(agents),
-            "tasks_created": len(tasks),
-            "metrics": metrics.__dict__ if hasattr(metrics, '__dict__') else metrics,
-            "data_flow": data_flow
-        }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "type": type(e).__name__
-        }, 500
-
-@app.get("/multi-agent/data-flow")
-async def get_data_flow():
-    """Get current data flow visualization between agents and servers."""
-    try:
-        data_flow = swarm_manager.get_data_flow_visualization()
-        return {
-            "success": True,
-            "data_flow": data_flow
-        }
-    except Exception as e:
-        return {
-            "error": str(e),
-            "type": type(e).__name__
-        }, 500
 
 if __name__ == "__main__":
     import datetime
