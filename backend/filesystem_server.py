@@ -17,7 +17,13 @@ except ImportError:
 # -------------------------
 # Ensure SANDBOX_DIR points to backend/mcp_sandbox even if script runs from different directory
 BACKEND_DIR = Path(__file__).parent.resolve()
-SANDBOX_DIR = (BACKEND_DIR / "mcp_sandbox").resolve()
+
+def get_sandbox_dir() -> Optional[Path]:
+    custom_sandbox = os.environ.get("MCP_SANDBOX_PATH", "").strip()
+    if custom_sandbox:
+        return Path(custom_sandbox).resolve()
+    return None
+
 MAX_READ_CHARS = 2000       # default truncation for read_file
 MAX_WRITE_BYTES = 2 * 1024 * 1024  # 2 MB max single write by default
 ALLOWED_TOPDIRS: Optional[List[str]] = None  # Example: ["projects", "uploads"] or None to allow all inside SANDBOX_DIR
@@ -36,12 +42,17 @@ logger.setLevel(logging.INFO)
 # Helpers
 # -------------------------
 def _ensure_sandbox():
-    SANDBOX_DIR.mkdir(parents=True, exist_ok=True)
+    sd = get_sandbox_dir()
+    if sd:
+        sd.mkdir(parents=True, exist_ok=True)
 
 def _is_within_sandbox(path: Path) -> bool:
+    sd = get_sandbox_dir()
+    if not sd:
+        return False
     try:
         path = path.resolve()
-        return str(path).startswith(str(SANDBOX_DIR))
+        return str(path).startswith(str(sd))
     except Exception:
         return False
 
@@ -66,7 +77,11 @@ def _get_safe_path(relative_path: str) -> Path:
     if ".." in rel.split("/"):
         raise ValueError("Path traversal detected (.. not allowed).")
 
-    candidate = (SANDBOX_DIR / rel).resolve()
+    sd = get_sandbox_dir()
+    if not sd:
+        raise ValueError("MCP_SANDBOX_PATH is not configured. Please set a workspace location in settings.")
+
+    candidate = (sd / rel).resolve()
 
     if not _is_within_sandbox(candidate):
         raise ValueError("Resolved path is outside the sandbox and is forbidden.")
@@ -95,7 +110,11 @@ class FilesystemMCPServer(IMCPExternalServer):
     def __init__(self):
         super().__init__(name="Filesystem")
         _ensure_sandbox()
-        logger.info("Filesystem MCP Server initialized. Sandbox: %s", SANDBOX_DIR)
+        sd = get_sandbox_dir()
+        if sd:
+            logger.info("Filesystem MCP Server initialized. Sandbox: %s", sd)
+        else:
+            logger.warning("Filesystem MCP Server initialized WITHOUT sandbox path! File operations will fail until configured.")
 
     def list_tools(self) -> List[MCPTool]:
         return [
@@ -296,10 +315,11 @@ class FilesystemMCPServer(IMCPExternalServer):
                 matches = glob.glob(glob_expr, recursive=True)
                 # normalize relative to sandbox
                 rel_matches = []
+                sd = get_sandbox_dir()
                 for m in matches[:max_results]:
                     mp = Path(m).resolve()
-                    if _is_within_sandbox(mp):
-                        rel_matches.append(str(mp.relative_to(SANDBOX_DIR)))
+                    if _is_within_sandbox(mp) and sd:
+                        rel_matches.append(str(mp.relative_to(sd)))
                 return {"base": rel, "pattern": pattern, "matches": rel_matches, "count": len(rel_matches), "code": 200}
 
             else:

@@ -9,6 +9,7 @@ import os
 from typing import Dict, Any, List
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -62,7 +63,7 @@ class LLMManager:
                 return result
             except Exception as e:
                 self.stats[provider['name']]["failures"] += 1
-                logger.warning(f"⚠️  {provider['name']}: {str(e)[:60]}")
+                logger.error(f"[LLM] {provider['name']} failed: {str(e)[:100]}, trying fallback")
                 continue
         
         raise Exception("All LLM providers failed")
@@ -106,24 +107,132 @@ def call_github(system: str, user: str) -> str:
         raise Exception(f"HTTP {resp.status_code}")
     return resp.json()['choices'][0]['message']['content']
 
+def call_openai(system: str, user: str) -> str:
+    import requests
+    model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+    resp = requests.post(
+        "https://api.openai.com/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ],
+            "temperature": float(os.getenv("AGENT_TEMPERATURE", "0.3")),
+            "max_tokens": int(os.getenv("AGENT_MAX_TOKENS", "2048"))
+        },
+        timeout=30
+    )
+    if resp.status_code != 200:
+        raise Exception(f"OpenAI error {resp.status_code}: {resp.text[:100]}")
+    return resp.json()['choices'][0]['message']['content']
+
+def call_anthropic(system: str, user: str) -> str:
+    import requests
+    model = os.getenv("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022")
+    resp = requests.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": os.getenv("ANTHROPIC_API_KEY"),
+            "anthropic-version": "2023-06-01",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": model,
+            "max_tokens": int(os.getenv("AGENT_MAX_TOKENS", "2048")),
+            "system": system,
+            "messages": [{"role": "user", "content": user}]
+        },
+        timeout=30
+    )
+    if resp.status_code != 200:
+        raise Exception(f"Anthropic error {resp.status_code}: {resp.text[:100]}")
+    return resp.json()['content'][0]['text']
+
+def call_gemini(system: str, user: str) -> str:
+    import requests
+    model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+    api_key = os.getenv("GEMINI_API_KEY")
+    resp = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}",
+        headers={"Content-Type": "application/json"},
+        json={
+            "contents": [{"parts": [{"text": f"{system}\n\n{user}"}]}],
+            "generationConfig": {
+                "temperature": float(os.getenv("AGENT_TEMPERATURE", "0.3")),
+                "maxOutputTokens": int(os.getenv("AGENT_MAX_TOKENS", "2048"))
+            }
+        },
+        timeout=30
+    )
+    if resp.status_code != 200:
+        raise Exception(f"Gemini error {resp.status_code}: {resp.text[:100]}")
+    return resp.json()['candidates'][0]['content']['parts'][0]['text']
+
+def call_ollama(system: str, user: str) -> str:
+    import requests
+    model = os.getenv("OLLAMA_MODEL", "llama3")
+    resp = requests.post(
+        f"{os.getenv('OLLAMA_HOST', 'http://localhost:11434')}/api/chat",
+        json={
+            "model": model,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user}
+            ],
+            "stream": False
+        },
+        timeout=60
+    )
+    if resp.status_code != 200:
+        raise Exception(f"Ollama error {resp.status_code}")
+    return resp.json()['message']['content']
+
 # ==================== GLOBAL STATE ====================
 
 SERVERS: Dict[str, IMCPExternalServer] = {}
 LLM = LLMManager()
 
 def init_llm():
-    """Initialize LLM providers."""
-    if HAVE_GROQ and os.getenv("GROQ_API_KEY"):
-        LLM.add_provider("Groq (Llama 3.3 70B)", call_groq)
-    
-    if os.getenv("GITHUB_TOKEN"):
-        LLM.add_provider("GitHub (GPT-4o-mini)", call_github)
-    
+    LLM.providers = []
+    LLM.stats = {}
+
+    primary = os.getenv("PRIMARY_PROVIDER", "groq")
+    fallback = os.getenv("FALLBACK_PROVIDER", "github")
+
+    provider_map = {
+        "groq": ("Groq (Llama 3.3 70B)", call_groq, "GROQ_API_KEY"),
+        "openai": ("OpenAI", call_openai, "OPENAI_API_KEY"),
+        "anthropic": ("Anthropic", call_anthropic, "ANTHROPIC_API_KEY"),
+        "gemini": ("Gemini", call_gemini, "GEMINI_API_KEY"),
+        "github": ("GitHub Models", call_github, "GITHUB_TOKEN"),
+        "ollama": ("Ollama (Local)", call_ollama, "OLLAMA_MODEL"),
+    }
+
+    order = [primary, fallback]
+    for key in provider_map:
+        if key not in order:
+            order.append(key)
+
+    for key in order:
+        if key not in provider_map:
+            continue
+        name, func, key_env = provider_map[key]
+        if key == "ollama":
+            LLM.add_provider(name, func)
+            continue
+        if os.getenv(key_env):
+            LLM.add_provider(name, func)
+
     if not LLM.providers:
-        logger.error("❌ No API keys found in .env")
+        logger.error("[STARTUP] No LLM providers configured")
         return False
-    
-    logger.info(f"🎯 {len(LLM.providers)} providers ready")
+
+    logger.info(f"[STARTUP] {len(LLM.providers)} providers ready: {[p['name'] for p in LLM.providers]}")
     return True
 
 @asynccontextmanager
@@ -146,14 +255,14 @@ async def lifespan(app: FastAPI):
     SERVERS["weather"] = WeatherMCPServer()
     SERVERS["code_executor"] = CodeExecutorMCPServer()
     SERVERS["system_info"] = SystemInfoMCPServer()
-    logger.info(f"✅ {len(SERVERS)} servers loaded")
+    logger.info(f"[STARTUP] {len(SERVERS)} servers loaded: {list(SERVERS.keys())}")
 
     logger.info("=" * 50)
-    logger.info("✅ READY - http://127.0.0.1:8000")
+    logger.info("[STARTUP] READY - http://127.0.0.1:8000")
     logger.info("=" * 50)
     
     yield
-    logger.info("🛑 Shutdown complete")
+    logger.info("[SHUTDOWN] Shutdown complete")
 
 # ==================== FASTAPI APP ====================
 
@@ -231,16 +340,13 @@ def extract_json_from_response(text: str) -> Dict[str, Any]:
 
 @app.post("/query", response_model=Response)
 async def query(q: Query):
-    """
-    Process user query with swarm intelligence and multi-persona coordination.
+    import time
+    start_time = time.time()
     
-    Supports complex workflows:
-    - Research (Browser MCP Server)
-    - Code Implementation (Filesystem MCP Server)
-    - GitHub Operations (GitHub MCP Server)
-    """
+    logger.info(f"[QUERY] Incoming: '{q.user_query[:100]}'")
     
     if not LLM.providers:
+        logger.error("[QUERY] Failed: No LLM configured")
         raise HTTPException(500, "No LLM configured")
 
     context = SwarmContext()
@@ -248,12 +354,10 @@ async def query(q: Query):
     context.workflow_phase = "analysis"
     tool_calls = []
     
-    # Detect if this query requires file creation
     requires_file_creation = any(keyword in q.user_query.lower() for keyword in 
                                   ['create', 'save', 'write', '.txt', '.md', '.json', '.csv', 'file'])
     
-    # ==================== PHASE 1: ANALYSIS & TASK DECOMPOSITION ====================
-    logger.info("📋 PHASE 1: Analyzing query and decomposing into tasks...")
+    try:
     
     # Manager Persona context
     manager_prompt = PERSONAS["Manager"]["prompt"]
@@ -287,28 +391,23 @@ Respond with ONLY valid JSON (no markdown, no extra text)."""
     
     try:
         analysis_resp = LLM.call(analysis_system, analysis_user)
-        logger.info(f"📤 Analysis Response: {analysis_resp[:200]}")
         analysis = extract_json_from_response(analysis_resp)
         
         if analysis:
             task_type = analysis.get("task_type", "simple")
             subtasks = analysis.get("subtasks", [q.user_query])
             context.add_event("Manager", f"Query classified as: {task_type}")
-            logger.info(f"📌 Task Type: {task_type}")
+            logger.info(f"[QUERY] Task Type: {task_type}")
         else:
-            logger.warning("⚠️  Analysis returned empty, using defaults")
+            logger.warning("[QUERY] Analysis returned empty, using defaults")
     except Exception as e:
-        logger.error(f"Analysis failed: {e}")
+        logger.error(f"[QUERY] Analysis failed: {e}")
         context.add_event("Manager", "Analysis failed, using simple mode")
 
     # ==================== PHASE 2: EXECUTE SUBTASKS ====================
     context.workflow_phase = "execution"
     
-    # Process each subtask, utilizing the appropriate persona
     for idx, subtask in enumerate(subtasks):
-        logger.info(f"🔄 Executing Subtask {idx+1}/{len(subtasks)}: {subtask}")
-        context.add_event("Manager", f"Delegating Subtask: {subtask}")
-        
         # Determine which persona to use
         current_persona = "Manager"
         if task_type == "research" or (task_type == "complex" and ("search" in subtask.lower() or "find" in subtask.lower() or "research" in subtask.lower())):
@@ -316,11 +415,9 @@ Respond with ONLY valid JSON (no markdown, no extra text)."""
         elif task_type in ["code", "github"] or (task_type == "complex" and ("code" in subtask.lower() or "create" in subtask.lower() or "write" in subtask.lower() or "file" in subtask.lower())):
             current_persona = "Coder"
         elif task_type == "simple":
-             # For simple tasks, we can just skip to final phase if no tools are needed,
-             # but we'll run one iteration with the Manager just to get it answered quickly.
              pass
 
-        logger.info(f"🎭 Using Persona: {current_persona}")
+        logger.info(f"[QUERY] Persona Selected: {current_persona} for subtask: {subtask[:50]}")
         persona = PERSONAS[current_persona]
         
         # Build list of tools ALOWED for this persona
@@ -503,7 +600,7 @@ What is your next action for this subtask? Respond with ONLY valid JSON."""
                 context.add_event("Error", validation_error)
                 continue
             
-            logger.info(f"🛠️  Executing: {tool_name} on server {srv_name}")
+            logger.info(f"[TOOL] {tool_name} | {str(args)[:100]}")
             
             if srv_name in SERVERS:
                 try:
@@ -517,13 +614,13 @@ What is your next action for this subtask? Respond with ONLY valid JSON."""
                         "tool": tool_name,
                         "result": result
                     })
-                    logger.info(f"✅ {tool_name} succeeded")
+                    logger.info(f"[TOOL] Result: Success for {tool_name}")
                 except Exception as e:
                     error_msg = str(e)[:100]
                     context.add_event("Error", f"{tool_name} failed: {error_msg}")
-                    logger.error(f"❌ {tool_name}: {error_msg}")
+                    logger.error(f"[TOOL] Result: Error for {tool_name} - {error_msg}")
             else:
-                logger.warning(f"⚠️  Unknown server: {srv_name}")
+                logger.warning(f"[TOOL] Unknown server: {srv_name}")
 
         # Give the agent a few tries to complete the subtask if it opted to use a tool
         # In a real swarm system we could nest a while loop here, but for simplicity
@@ -559,10 +656,17 @@ Provide a clear final answer based on the work completed."""
     if not final_answer:
         final_answer = f"Task completed successfully. {len(tool_calls)} tools were used."
 
+    total_time = time.time() - start_time
+    logger.info(f"[QUERY] Finished in {total_time:.2f}s with {len(tool_calls)} tool calls")
+
     return Response(
         final_answer=final_answer,
         tool_calls_executed=tool_calls
     )
+
+    except Exception as e:
+        logger.exception(f"[QUERY] Exception during request handling. Payload: {str(q.user_query)[:100]}")
+        raise HTTPException(500, str(e))
 
 @app.get("/")
 async def root():
@@ -609,7 +713,315 @@ async def swarm_status():
         "llm_providers": [p["name"] for p in LLM.providers]
     }
 
+ENV_FILE_PATH = Path(__file__).parent / ".env"
 
+def read_env_file() -> dict:
+    result = {}
+    if not ENV_FILE_PATH.exists():
+        return result
+    for line in ENV_FILE_PATH.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, _, val = line.partition("=")
+            result[key.strip()] = val.strip()
+    return result
+
+def write_env_file(data: dict):
+    lines = []
+    for key, val in data.items():
+        if val:
+            lines.append(f"{key}={val}")
+    ENV_FILE_PATH.write_text("\n".join(lines) + "\n")
+
+@app.get("/settings")
+async def get_settings():
+    env = read_env_file()
+    from filesystem_server import SANDBOX_DIR
+    return {
+        "sandbox_path": env.get("MCP_SANDBOX_PATH", str(SANDBOX_DIR)),
+        "github_path": env.get("GITHUB_PATH", ""),
+        "primary_provider": env.get("PRIMARY_PROVIDER", "groq"),
+        "fallback_provider": env.get("FALLBACK_PROVIDER", "github"),
+        "groq_api_key": env.get("GROQ_API_KEY", ""),
+        "groq_model": env.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
+        "openai_api_key": env.get("OPENAI_API_KEY", ""),
+        "openai_model": env.get("OPENAI_MODEL", "gpt-4o-mini"),
+        "anthropic_api_key": env.get("ANTHROPIC_API_KEY", ""),
+        "anthropic_model": env.get("ANTHROPIC_MODEL", "claude-3-5-haiku-20241022"),
+        "gemini_api_key": env.get("GEMINI_API_KEY", ""),
+        "gemini_model": env.get("GEMINI_MODEL", "gemini-1.5-flash"),
+        "github_token": env.get("GITHUB_TOKEN", ""),
+        "github_model": env.get("GITHUB_MODEL", "gpt-4o-mini"),
+        "ollama_host": env.get("OLLAMA_HOST", "http://localhost:11434"),
+        "ollama_model": env.get("OLLAMA_MODEL", "llama3"),
+        "browser_enabled": env.get("BROWSER_ENABLED", "true") == "true",
+        "filesystem_enabled": env.get("FILESYSTEM_ENABLED", "true") == "true",
+        "github_enabled": env.get("GITHUB_ENABLED", "true") == "true",
+        "weather_enabled": env.get("WEATHER_ENABLED", "true") == "true",
+        "code_runner_enabled": env.get("CODE_RUNNER_ENABLED", "true") == "true",
+        "system_info_enabled": env.get("SYSTEM_INFO_ENABLED", "true") == "true",
+        "agent_temperature": float(env.get("AGENT_TEMPERATURE", "0.3")),
+        "agent_max_tokens": int(env.get("AGENT_MAX_TOKENS", "2048")),
+        "agent_max_iterations": int(env.get("AGENT_MAX_ITERATIONS", "5")),
+    }
+
+class SettingsPayload(BaseModel):
+    primary_provider: str = "groq"
+    fallback_provider: str = "github"
+    groq_api_key: str = ""
+    groq_model: str = "llama-3.3-70b-versatile"
+    openai_api_key: str = ""
+    openai_model: str = "gpt-4o-mini"
+    anthropic_api_key: str = ""
+    anthropic_model: str = "claude-3-5-haiku-20241022"
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-1.5-flash"
+    github_token: str = ""
+    github_model: str = "gpt-4o-mini"
+    ollama_host: str = "http://localhost:11434"
+    ollama_model: str = "llama3"
+    browser_enabled: bool = True
+    filesystem_enabled: bool = True
+    github_enabled: bool = True
+    weather_enabled: bool = True
+    code_runner_enabled: bool = True
+    system_info_enabled: bool = True
+    agent_temperature: float = 0.3
+    agent_max_tokens: int = 2048
+    agent_max_iterations: int = 5
+    sandbox_path: str = ""
+    github_path: str = ""
+
+@app.post("/settings")
+async def save_settings(payload: SettingsPayload):
+    env = read_env_file()
+
+    env["PRIMARY_PROVIDER"] = payload.primary_provider
+    env["FALLBACK_PROVIDER"] = payload.fallback_provider
+    if payload.groq_api_key:
+        env["GROQ_API_KEY"] = payload.groq_api_key
+    env["GROQ_MODEL"] = payload.groq_model
+    if payload.openai_api_key:
+        env["OPENAI_API_KEY"] = payload.openai_api_key
+    env["OPENAI_MODEL"] = payload.openai_model
+    if payload.anthropic_api_key:
+        env["ANTHROPIC_API_KEY"] = payload.anthropic_api_key
+    env["ANTHROPIC_MODEL"] = payload.anthropic_model
+    if payload.gemini_api_key:
+        env["GEMINI_API_KEY"] = payload.gemini_api_key
+    env["GEMINI_MODEL"] = payload.gemini_model
+    if payload.github_token:
+        if env.get("GITHUB_TOKEN") != payload.github_token:
+            logger.info("[SETTINGS] API Key changed for: GITHUB")
+        env["GITHUB_TOKEN"] = payload.github_token
+        if "GITHUB_PAT" not in env or env["GITHUB_PAT"] == env.get("GITHUB_TOKEN"):
+            env["GITHUB_PAT"] = payload.github_token
+    env["GITHUB_MODEL"] = payload.github_model
+    env["OLLAMA_HOST"] = payload.ollama_host
+    env["OLLAMA_MODEL"] = payload.ollama_model
+    env["BROWSER_ENABLED"] = str(payload.browser_enabled).lower()
+    env["FILESYSTEM_ENABLED"] = str(payload.filesystem_enabled).lower()
+    env["GITHUB_ENABLED"] = str(payload.github_enabled).lower()
+    env["WEATHER_ENABLED"] = str(payload.weather_enabled).lower()
+    env["CODE_RUNNER_ENABLED"] = str(payload.code_runner_enabled).lower()
+    env["SYSTEM_INFO_ENABLED"] = str(payload.system_info_enabled).lower()
+    env["AGENT_TEMPERATURE"] = str(payload.agent_temperature)
+    env["AGENT_MAX_TOKENS"] = str(payload.agent_max_tokens)
+    env["AGENT_MAX_ITERATIONS"] = str(payload.agent_max_iterations)
+
+    if payload.sandbox_path:
+        env["MCP_SANDBOX_PATH"] = payload.sandbox_path
+    if payload.github_path:
+        env["GITHUB_PATH"] = payload.github_path
+
+    if payload.groq_api_key and env.get("GROQ_API_KEY") != payload.groq_api_key:
+        logger.info("[SETTINGS] API Key changed for: GROQ")
+    if payload.openai_api_key and env.get("OPENAI_API_KEY") != payload.openai_api_key:
+        logger.info("[SETTINGS] API Key changed for: OPENAI")
+    if payload.anthropic_api_key and env.get("ANTHROPIC_API_KEY") != payload.anthropic_api_key:
+        logger.info("[SETTINGS] API Key changed for: ANTHROPIC")
+    if payload.gemini_api_key and env.get("GEMINI_API_KEY") != payload.gemini_api_key:
+        logger.info("[SETTINGS] API Key changed for: GEMINI")
+
+    logger.info(f"[SETTINGS] Primary provider changed: {env.get('PRIMARY_PROVIDER', 'unknown')} -> {payload.primary_provider}")
+
+    write_env_file(env)
+
+    for key, val in env.items():
+        os.environ[key] = val
+
+    load_dotenv(override=True)
+    init_llm()
+
+    logger.info("[SETTINGS] Reloading MCP servers based on new settings...")
+    
+    if env.get("BROWSER_ENABLED", "true") == "true":
+        if "browser" not in SERVERS:
+            from browser_server import BrowserMCPServer
+            SERVERS["browser"] = BrowserMCPServer()
+            logger.info("[SETTINGS] MCP Server enabled: browser")
+    else:
+        if "browser" in SERVERS:
+            del SERVERS["browser"]
+            logger.info("[SETTINGS] MCP Server disabled: browser")
+
+    if env.get("FILESYSTEM_ENABLED", "true") == "true":
+        if "filesystem" not in SERVERS:
+            from filesystem_server import FilesystemMCPServer
+            SERVERS["filesystem"] = FilesystemMCPServer()
+            logger.info("[SETTINGS] MCP Server enabled: filesystem")
+    else:
+        if "filesystem" in SERVERS:
+            del SERVERS["filesystem"]
+            logger.info("[SETTINGS] MCP Server disabled: filesystem")
+
+    if env.get("GITHUB_ENABLED", "true") == "true":
+        if "github" not in SERVERS:
+            from github_server import GitHubMCPServer
+            SERVERS["github"] = GitHubMCPServer()
+            logger.info("[SETTINGS] MCP Server enabled: github")
+    else:
+        if "github" in SERVERS:
+            del SERVERS["github"]
+            logger.info("[SETTINGS] MCP Server disabled: github")
+
+    if env.get("WEATHER_ENABLED", "true") == "true":
+        if "weather" not in SERVERS:
+            from weather_server import WeatherMCPServer
+            SERVERS["weather"] = WeatherMCPServer()
+            logger.info("[SETTINGS] MCP Server enabled: weather")
+    else:
+        if "weather" in SERVERS:
+            del SERVERS["weather"]
+            logger.info("[SETTINGS] MCP Server disabled: weather")
+
+    if env.get("CODE_RUNNER_ENABLED", "true") == "true":
+        if "code_executor" not in SERVERS:
+            from code_executor_server import CodeExecutorMCPServer
+            SERVERS["code_executor"] = CodeExecutorMCPServer()
+            logger.info("[SETTINGS] MCP Server enabled: code_executor")
+    else:
+        if "code_executor" in SERVERS:
+            del SERVERS["code_executor"]
+            logger.info("[SETTINGS] MCP Server disabled: code_executor")
+
+    if env.get("SYSTEM_INFO_ENABLED", "true") == "true":
+        if "system_info" not in SERVERS:
+            from system_info_server import SystemInfoMCPServer
+            SERVERS["system_info"] = SystemInfoMCPServer()
+            logger.info("[SETTINGS] MCP Server enabled: system_info")
+    else:
+        if "system_info" in SERVERS:
+            del SERVERS["system_info"]
+            logger.info("[SETTINGS] MCP Server disabled: system_info")
+
+    return {
+        "status": "saved",
+        "active_providers": [p["name"] for p in LLM.providers],
+        "active_servers": list(SERVERS.keys())
+    }
+
+@app.post("/settings/test")
+async def test_provider(payload: dict):
+    provider = payload.get("provider")
+    api_key = payload.get("api_key")
+    model = payload.get("model", "")
+
+    if not provider or not api_key:
+        raise HTTPException(400, "provider and api_key required")
+
+    try:
+        if provider == "groq":
+            from groq import Groq
+            client = Groq(api_key=api_key)
+            client.chat.completions.create(
+                model=model or "llama-3.3-70b-versatile",
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=5
+            )
+
+        elif provider == "openai":
+            import requests
+            r = requests.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}",
+                         "Content-Type": "application/json"},
+                json={"model": model or "gpt-4o-mini",
+                      "messages": [{"role": "user", "content": "hi"}],
+                      "max_tokens": 5},
+                timeout=10
+            )
+            if r.status_code != 200:
+                raise Exception(r.text[:100])
+
+        elif provider == "anthropic":
+            import requests
+            r = requests.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": api_key,
+                         "anthropic-version": "2023-06-01",
+                         "Content-Type": "application/json"},
+                json={"model": model or "claude-3-5-haiku-20241022",
+                      "max_tokens": 5,
+                      "messages": [{"role": "user", "content": "hi"}]},
+                timeout=10
+            )
+            if r.status_code != 200:
+                raise Exception(r.text[:100])
+
+        elif provider == "gemini":
+            import requests
+            m = model or "gemini-1.5-flash"
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}",
+                json={"contents": [{"parts": [{"text": "hi"}]}]},
+                timeout=10
+            )
+            if r.status_code != 200:
+                raise Exception(r.text[:100])
+
+        elif provider == "github":
+            import requests
+            r = requests.post(
+                "https://models.inference.ai.azure.com/chat/completions",
+                headers={"Authorization": f"Bearer {api_key}",
+                         "Content-Type": "application/json"},
+                json={"model": model or "gpt-4o-mini",
+                      "messages": [{"role": "user", "content": "hi"}],
+                      "max_tokens": 5},
+                timeout=10
+            )
+            if r.status_code != 200:
+                raise Exception(r.text[:100])
+
+        elif provider == "ollama":
+            import requests
+            host = payload.get("ollama_host", "http://localhost:11434")
+            r = requests.get(f"{host}/api/tags", timeout=5)
+            if r.status_code != 200:
+                raise Exception("Ollama not reachable")
+
+        return {"status": "ok", "provider": provider}
+
+    except Exception as e:
+        raise HTTPException(400, str(e))
+
+@app.delete("/sandbox")
+async def clear_sandbox():
+    from filesystem_server import SANDBOX_DIR
+    import shutil
+    cleared = []
+    if SANDBOX_DIR.exists():
+        for item in SANDBOX_DIR.iterdir():
+            if item.name != "README.md":
+                if item.is_dir():
+                    shutil.rmtree(item)
+                else:
+                    item.unlink()
+                cleared.append(item.name)
+    return {"status": "cleared", "files_removed": cleared}
 
 if __name__ == "__main__":
     import datetime
