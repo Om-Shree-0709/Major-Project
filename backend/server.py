@@ -738,9 +738,10 @@ def write_env_file(data: dict):
 @app.get("/settings")
 async def get_settings():
     env = read_env_file()
-    from filesystem_server import SANDBOX_DIR
+    from filesystem_server import get_sandbox_dir
+    sd = get_sandbox_dir()
     return {
-        "sandbox_path": env.get("MCP_SANDBOX_PATH", str(SANDBOX_DIR)),
+        "sandbox_path": env.get("MCP_SANDBOX_PATH", str(sd) if sd else ""),
         "github_path": env.get("GITHUB_PATH", ""),
         "primary_provider": env.get("PRIMARY_PROVIDER", "groq"),
         "fallback_provider": env.get("FALLBACK_PROVIDER", "github"),
@@ -1010,7 +1011,10 @@ async def test_provider(payload: dict):
 
 @app.delete("/sandbox")
 async def clear_sandbox():
-    from filesystem_server import SANDBOX_DIR
+    from filesystem_server import get_sandbox_dir
+    SANDBOX_DIR = get_sandbox_dir()
+    if not SANDBOX_DIR:
+        return {"status": "error", "message": "Sandbox path not configured"}
     import shutil
     cleared = []
     if SANDBOX_DIR.exists():
